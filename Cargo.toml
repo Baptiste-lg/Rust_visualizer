@@ -4,3 +4,8 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+bevy = "0.13"
+rodio = "~0.17"
+cpal = "0.15"
+spectrum-analyzer = "1.7"
+bevy_egui = "0.27"
