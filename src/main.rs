@@ -2,6 +2,7 @@
 
 // --- Modules ---
 mod viz_2d;
+mod viz_3d;
 
 // --- Imports ---
 use bevy::prelude::*;
@@ -9,6 +10,7 @@ use rodio::{source::Source, Decoder, OutputStream, Sink};
 use spectrum_analyzer::{samples_fft_to_spectrum, scaling::divide_by_N_sqrt, windows::hann_window, FrequencyLimit};
 use std::{fs::File, io::BufReader, time::Instant};
 use viz_2d::Viz2DPlugin;
+use viz_3d::Viz3DPlugin;
 
 // --- Enums and Structs ---
 #[derive(States, Debug, Clone, PartialEq, Eq, Hash, Default)]
@@ -58,14 +60,20 @@ fn main() {
         .init_resource::<AudioSamples>()
         .init_resource::<AudioAnalysis>()
         .init_state::<AppState>()
+
+        // Ajout des deux plugins
         .add_plugins(Viz2DPlugin)
+        .add_plugins(Viz3DPlugin) // Ajout du plugin 3D
+
         .add_systems(OnEnter(AppState::MainMenu), setup_main_menu)
         .add_systems(Update, menu_button_interaction.run_if(in_state(AppState::MainMenu)))
         .add_systems(OnExit(AppState::MainMenu), cleanup_menu)
+
+        // Organisation des systèmes pour chaque état
         .add_systems(OnEnter(AppState::Visualization2D), play_audio_file)
-        .add_systems(OnEnter(AppState::Visualization3D), play_audio_file)
+        .add_systems(OnEnter(AppState::Visualization3D), (play_audio_file, setup_3d_scene)) // setup_3d_scene installe la caméra/lumière
         .add_systems(Update, audio_analysis_system.run_if(in_state(AppState::Visualization2D).or_else(in_state(AppState::Visualization3D))))
-        .add_systems(OnEnter(AppState::Visualization3D), setup_3d_scene)
+
         .run();
 }
 
@@ -80,15 +88,12 @@ fn play_audio_file(
     let file = BufReader::new(File::open("assets/ShortClip.mp3").expect("Failed to open music file"));
     let source = Decoder::new(file).unwrap();
 
-    // --- CORRECTED: Get info from source BEFORE it's moved ---
     let sample_rate = source.sample_rate();
     let channels = source.channels();
     commands.insert_resource(AudioInfo { sample_rate });
 
-    // 1. Convert the source to an iterator of f32 samples. This moves `source`.
     let mut f32_source = source.convert_samples::<f32>();
 
-    // 2. Convert to mono by averaging channels if necessary
     let samples: Vec<f32> = if channels == 2 {
         let mut mono_samples = Vec::new();
         while let (Some(left), Some(right)) = (f32_source.next(), f32_source.next()) {
@@ -101,8 +106,6 @@ fn play_audio_file(
 
     audio_samples.0 = samples;
 
-    // --- Play the audio ---
-    // Use the `sample_rate` variable we stored earlier.
     let new_source = rodio::buffer::SamplesBuffer::new(1, sample_rate, audio_samples.0.clone());
     sink.clear();
     sink.append(new_source);
@@ -260,12 +263,12 @@ fn cleanup_menu(mut commands: Commands, ui_query: Query<Entity, With<MainMenuUI>
 fn setup_3d_scene(mut commands: Commands) {
     info!("Setting up 3D scene...");
     commands.spawn(Camera3dBundle {
-        transform: Transform::from_xyz(-2.0, 2.5, 5.0).looking_at(Vec3::ZERO, Vec3::Y),
+        transform: Transform::from_xyz(-12.0, 10.0, 12.0).looking_at(Vec3::ZERO, Vec3::Y),
         ..default()
     });
     commands.spawn(PointLightBundle {
         point_light: PointLight {
-            intensity: 1500.0,
+            intensity: 2000.0,
             shadows_enabled: true,
             ..default()
         },
