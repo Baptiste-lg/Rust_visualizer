@@ -26,7 +26,6 @@ struct MainMenuUI;
 // --- Main Application Logic ---
 
 fn main() {
-    // --- CORRECTED: Create the audio resources BEFORE building the App ---
     // 1. Get the stream and its handle.
     let (stream, stream_handle) = OutputStream::try_default().unwrap();
 
@@ -61,7 +60,6 @@ fn main() {
 
 /// Accesses the audio Sink and plays a hardcoded file.
 fn play_audio_file(
-    // CORRECTED: Get non-mutable access to the Sink. This resolves the warning.
     sink: NonSend<Sink>
 ) {
     // Load a sound from a file.
