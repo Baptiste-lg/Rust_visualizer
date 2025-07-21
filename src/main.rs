@@ -5,8 +5,8 @@ mod viz_2d;
 
 // --- Imports ---
 use bevy::prelude::*;
-use rodio::{Decoder, OutputStream, Sink, source::SamplesConverter}; // Added for audio playback
-use spectrum_analyzer::{samples_fft_to_spectrum, scaling::divide_by_N_sqrt, windows::hann_window, FrequencyLimit}; // Added for FFT
+use rodio::{source::Source, Decoder, OutputStream, Sink};
+use spectrum_analyzer::{samples_fft_to_spectrum, scaling::divide_by_N_sqrt, windows::hann_window, FrequencyLimit};
 use std::{fs::File, io::BufReader, time::Instant};
 use viz_2d::Viz2DPlugin;
 
@@ -28,15 +28,17 @@ enum MenuButtonAction {
 #[derive(Component)]
 struct MainMenuUI;
 
-/// Resource to hold the raw audio samples of the entire song
-#[derive(Resource, Default)]
+#[derive(Resource, Default, Clone)]
 pub struct AudioSamples(pub Vec<f32>);
 
-/// Resource to hold the start time of playback
+#[derive(Resource)]
+pub struct AudioInfo {
+    pub sample_rate: u32,
+}
+
 #[derive(Resource)]
 pub struct PlaybackStartTime(pub Instant);
 
-/// Resource to hold the real-time audio analysis results
 #[derive(Resource, Default)]
 pub struct AudioAnalysis {
     pub bass: f32,
@@ -46,38 +48,23 @@ pub struct AudioAnalysis {
 
 // --- Main Application Logic ---
 fn main() {
-    // Set up audio resources for playback
     let (stream, stream_handle) = OutputStream::try_default().unwrap();
     let sink = Sink::try_new(&stream_handle).unwrap();
 
     App::new()
         .add_plugins(DefaultPlugins)
-
-        // Add audio playback resources
         .insert_non_send_resource(stream)
         .insert_non_send_resource(sink)
-
-        // Add our custom resources and state machine
         .init_resource::<AudioSamples>()
         .init_resource::<AudioAnalysis>()
         .init_state::<AppState>()
-
-        // Add the plugin for our 2D visualization
         .add_plugins(Viz2DPlugin)
-
-        // Systems for MainMenu state
         .add_systems(OnEnter(AppState::MainMenu), setup_main_menu)
         .add_systems(Update, menu_button_interaction.run_if(in_state(AppState::MainMenu)))
         .add_systems(OnExit(AppState::MainMenu), cleanup_menu)
-
-        // System to start audio playback
         .add_systems(OnEnter(AppState::Visualization2D), play_audio_file)
         .add_systems(OnEnter(AppState::Visualization3D), play_audio_file)
-
-        // Real audio analysis system
         .add_systems(Update, audio_analysis_system.run_if(in_state(AppState::Visualization2D).or_else(in_state(AppState::Visualization3D))))
-
-        // Placeholder for the 3D scene
         .add_systems(OnEnter(AppState::Visualization3D), setup_3d_scene)
         .run();
 }
@@ -85,115 +72,101 @@ fn main() {
 
 // --- Core Systems ---
 
-/// Loads the entire audio file into memory and starts playback.
 fn play_audio_file(
     mut commands: Commands,
     sink: NonSend<Sink>,
     mut audio_samples: ResMut<AudioSamples>,
 ) {
-    // --- Load the audio file ---
     let file = BufReader::new(File::open("assets/ShortClip.mp3").expect("Failed to open music file"));
-    // Decode the audio file into a stream of samples
     let source = Decoder::new(file).unwrap();
 
-    // We need to convert the audio to a single channel (mono) and a consistent sample rate
-    // Bevy's default sample rate is 44100. Let's use that.
-    let converter = SamplesConverter::new(source, 1, 44100);
-    // Collect all samples into a Vec<f32> in memory. This is our raw data.
-    audio_samples.0 = converter.collect();
+    // --- CORRECTED: Get info from source BEFORE it's moved ---
+    let sample_rate = source.sample_rate();
+    let channels = source.channels();
+    commands.insert_resource(AudioInfo { sample_rate });
+
+    // 1. Convert the source to an iterator of f32 samples. This moves `source`.
+    let mut f32_source = source.convert_samples::<f32>();
+
+    // 2. Convert to mono by averaging channels if necessary
+    let samples: Vec<f32> = if channels == 2 {
+        let mut mono_samples = Vec::new();
+        while let (Some(left), Some(right)) = (f32_source.next(), f32_source.next()) {
+            mono_samples.push((left + right) / 2.0);
+        }
+        mono_samples
+    } else {
+        f32_source.collect()
+    };
+
+    audio_samples.0 = samples;
 
     // --- Play the audio ---
-    // Create a new audio source from our collected samples that can be played by the sink
-    let new_source = rodio::buffer::SamplesBuffer::new(1, 44100, audio_samples.0.clone());
-    sink.clear(); // Remove any previous audio
+    // Use the `sample_rate` variable we stored earlier.
+    let new_source = rodio::buffer::SamplesBuffer::new(1, sample_rate, audio_samples.0.clone());
+    sink.clear();
     sink.append(new_source);
     sink.play();
 
-    // Store the exact start time of playback
     commands.insert_resource(PlaybackStartTime(Instant::now()));
-
     info!("Audio loaded and playback started.");
 }
 
-
-/// This system performs the actual FFT analysis on the audio data.
 fn audio_analysis_system(
     audio_samples: Res<AudioSamples>,
+    audio_info: Option<Res<AudioInfo>>,
     start_time: Option<Res<PlaybackStartTime>>,
     mut audio_analysis: ResMut<AudioAnalysis>,
 ) {
-    // Only run if the audio has started playing
-    let Some(start_time) = start_time else { return };
+    let (Some(start_time), Some(audio_info)) = (start_time, audio_info) else { return };
     if audio_samples.0.is_empty() { return };
 
-    // --- Get current slice of audio data ---
     let elapsed = start_time.0.elapsed().as_secs_f32();
-    let sample_rate = 44100.0;
-    // The number of samples to analyze at once. Must be a power of 2.
     let fft_size = 4096;
+    let current_sample_index = (elapsed * audio_info.sample_rate as f32) as usize;
 
-    // Calculate the current position in the audio data
-    let current_sample_index = (elapsed * sample_rate) as usize;
-
-    // Ensure we don't go past the end of the song
     if current_sample_index + fft_size > audio_samples.0.len() {
-        // Reset analysis when the song ends
         *audio_analysis = AudioAnalysis::default();
         return;
     }
 
-    // Get the slice of samples for the FFT
     let samples_slice = &audio_samples.0[current_sample_index..current_sample_index + fft_size];
-
-    // --- Perform FFT analysis ---
-    // Apply a window function to the samples to improve FFT accuracy [cite: 60]
     let hann_window = hann_window(samples_slice);
 
-    // Perform the FFT
-    let spectrum = samples_fft_to_spectrum(
+    let spectrum_result = samples_fft_to_spectrum(
         &hann_window,
-        sample_rate as u32,
-        // Define frequency limits for the analysis
+        audio_info.sample_rate,
         FrequencyLimit::Range(20.0, 20000.0),
-        // Use a logarithmic scaling for better visualization
         Some(&divide_by_N_sqrt),
     );
 
-    // --- Map FFT results to frequency bands [cite: 61] ---
+    let spectrum = spectrum_result.expect("Failed to compute spectrum");
+
     let bass_limit = 250.0;
     let mid_limit = 4000.0;
-    // let treble_limit = 20000.0; // This is the max
 
     let mut bass_val = 0.0;
     let mut mid_val = 0.0;
     let mut treble_val = 0.0;
 
     for (freq, val) in spectrum.data() {
-        if *freq < bass_limit {
+        if *freq < bass_limit.into() {
             bass_val += val.val();
-        } else if *freq < mid_limit {
+        } else if *freq < mid_limit.into() {
             mid_val += val.val();
         } else {
             treble_val += val.val();
         }
     }
 
-    // Update the resource with the new values. We add a small multiplier to make the effect more visible.
-    audio_analysis.bass = bass_val * 1.5;
-    audio_analysis.mid = mid_val * 1.5;
-    audio_analysis.treble = treble_val * 1.5;
+    let smoothing = 0.5;
+    audio_analysis.bass = audio_analysis.bass * smoothing + (bass_val * 1.5) * (1.0 - smoothing);
+    audio_analysis.mid = audio_analysis.mid * smoothing + (mid_val * 1.5) * (1.0 - smoothing);
+    audio_analysis.treble = audio_analysis.treble * smoothing + (treble_val * 1.5) * (1.0 - smoothing);
 }
 
 
-// --- UI and Scene Systems (Complete but unchanged from before) ---
-
-#[derive(Component)]
-enum MenuButtonAction {
-    Start3D,
-    Start2D,
-}
-#[derive(Component)]
-struct MainMenuUI;
+// --- UI and Scene Systems ---
 
 fn setup_main_menu(mut commands: Commands) {
     commands.spawn((Camera2dBundle::default(), MainMenuUI));
