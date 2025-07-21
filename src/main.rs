@@ -12,9 +12,8 @@ use std::{fs::File, io::BufReader, time::Instant};
 use viz_2d::Viz2DPlugin;
 use viz_3d::Viz3DPlugin;
 
-// --- NOUVEAUX IMPORTS pour CPAL ---
+// --- Imports for CPAL ---
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use std::sync::{Arc, Mutex};
 
 // --- Enums and Structs ---
 #[derive(States, Debug, Clone, PartialEq, Eq, Hash, Default)]
@@ -52,10 +51,7 @@ pub struct AudioAnalysis {
     pub treble: f32,
 }
 
-// --- NOUVELLE RESSOURCE POUR LE FLUX DU MICROPHONE ---
-#[derive(Resource)]
-struct MicStream(cpal::Stream);
-
+// REMOVED the MicStream struct. We don't need it.
 
 // --- Main Application Logic ---
 fn main() {
@@ -73,8 +69,7 @@ fn main() {
         .add_plugins(Viz2DPlugin)
         .add_plugins(Viz3DPlugin)
 
-        // --- AJOUT DU SYSTÈME D'INITIALISATION DU MICROPHONE ---
-        // Ce système s'exécute une seule fois au démarrage de l'application.
+        // Add the microphone setup system to run at startup.
         .add_systems(Startup, setup_microphone)
 
         .add_systems(OnEnter(AppState::MainMenu), setup_main_menu)
@@ -89,66 +84,58 @@ fn main() {
 }
 
 
-// --- NOUVEAU SYSTÈME POUR LE MICROPHONE ---
+// --- Microphone System ---
 
-/// Initialise le flux d'entrée du microphone par défaut en utilisant cpal.
-fn setup_microphone(mut commands: Commands) {
-    // Obtenir l'hôte audio par défaut
+/// Initializes the default microphone input stream using cpal.
+fn setup_microphone() {
     let host = cpal::default_host();
+    let device = host.default_input_device().expect("No audio input device found");
+    info!("Audio input device: {}", device.name().unwrap_or_else(|_| "Unknown name".into()));
 
-    // Obtenir le périphérique d'entrée par défaut
-    let device = host.default_input_device().expect("Aucun périphérique d'entrée audio trouvé");
-    info!("Périphérique d'entrée audio: {}", device.name().unwrap_or_else(|_| "Nom inconnu".into()));
+    let config = device.default_input_config().expect("Failed to get default input config");
+    info!("Default input config: {:?}", config);
 
-    // Obtenir la configuration de flux par défaut
-    let config = device.default_input_config().expect("Impossible d'obtenir la configuration d'entrée par défaut");
-    info!("Configuration d'entrée par défaut: {:?}", config);
-
-    // Le canal où nous enverrons les données audio
+    // Create a channel to send audio data from the audio thread to our logging thread.
     let (tx, rx) = std::sync::mpsc::channel::<Vec<f32>>();
 
-    // Créer le flux audio
     let stream = device.build_input_stream(
         &config.into(),
         move |data: &[f32], _: &cpal::InputCallbackInfo| {
-            // Envoyer les données du tampon au thread principal via le canal
-            // Nous clonons les données pour les envoyer à travers le canal
+            // Send the buffer data to the main thread via the channel.
             tx.send(data.to_vec()).unwrap();
         },
         |err| {
-            // Gérer les erreurs de flux
-            error!("Une erreur est survenue sur le flux audio: {}", err);
+            error!("An error occurred on the audio stream: {}", err);
         },
-        None // Optionnel : timeout
-    ).expect("Impossible de construire le flux d'entrée");
+        None
+    ).expect("Failed to build input stream");
 
-    // Démarrer le flux
-    stream.play().expect("Impossible de démarrer le flux audio");
+    stream.play().expect("Failed to play audio stream");
 
-    // Insérer le flux en tant que ressource pour qu'il ne soit pas détruit
-    commands.insert_resource(MicStream(stream));
+    // **THE FIX**: Leak the stream.
+    // This detaches the stream from the current scope and keeps it alive for the
+    // duration of the program. This is necessary because the stream is not `Send`.
+    std::mem::forget(stream);
 
-    // Démarrer un thread séparé pour écouter les données audio et les afficher
+    // Spawn a separate thread to listen for and log the microphone data.
     std::thread::spawn(move || {
-        info!("Le thread d'écoute du microphone a démarré.");
+        info!("Microphone listening thread started.");
         loop {
             match rx.recv() {
                 Ok(buffer) => {
-                    // Calculer le volume moyen pour vérification
                     let sum: f32 = buffer.iter().map(|&x| x.abs()).sum();
                     let avg_volume = sum / buffer.len() as f32;
-                    // Afficher la confirmation dans la console
-                    info!("[Microphone] Données reçues. Longueur du tampon: {}, Volume moyen: {:.4}", buffer.len(), avg_volume);
+                    info!("[Microphone] Buffer received. Length: {}, Avg volume: {:.4}", buffer.len(), avg_volume);
                 }
                 Err(e) => {
-                    error!("Erreur lors de la réception des données du microphone: {}", e);
+                    error!("Error receiving microphone data: {}", e);
                     break;
                 }
             }
         }
     });
 
-    info!("Capture du microphone initialisée avec succès.");
+    info!("Microphone capture successfully initialized.");
 }
 
 
