@@ -1,5 +1,3 @@
-// English comments as requested
-
 use bevy::prelude::*;
 use rodio::{Decoder, OutputStream, Sink};
 use std::fs::File;
@@ -7,23 +5,20 @@ use std::io::BufReader;
 
 // --- Enums for State and UI ---
 
-/// Defines the different states of our application.
 #[derive(States, Debug, Clone, PartialEq, Eq, Hash, Default)]
 enum AppState {
-    #[default] // The default state is the MainMenu
+    #[default]
     MainMenu,
     Visualization3D,
     Visualization2D,
 }
 
-/// Enum to identify the action of each menu button.
 #[derive(Component)]
 enum MenuButtonAction {
     Start3D,
     Start2D,
 }
 
-/// Marker component to tag entities belonging to the main menu screen
 #[derive(Component)]
 struct MainMenuUI;
 
@@ -31,51 +26,51 @@ struct MainMenuUI;
 // --- Main Application Logic ---
 
 fn main() {
+    let (stream, stream_handle) = OutputStream::try_default().unwrap();
+    let sink = Sink::try_new(&stream_handle).unwrap();
+
+    // The stream must be kept alive, so we clone it to move it into the app.
+    let stream_clone = stream.clone();
+
     App::new()
         .add_plugins(DefaultPlugins)
-        // Add the State machine
+
+        .insert_non_send_resource(stream_clone)
+        .insert_non_send_resource(sink)
+
         .init_state::<AppState>()
 
-        // Systems that run in the MainMenu state
+        // Systems for MainMenu state
         .add_systems(OnEnter(AppState::MainMenu), setup_main_menu)
         .add_systems(Update, menu_button_interaction.run_if(in_state(AppState::MainMenu)))
         .add_systems(OnExit(AppState::MainMenu), cleanup_menu)
 
-        // Systems that run when entering the visualization states
-        // We add the audio setup here, so it runs after a mode is selected.
-        .add_systems(OnEnter(AppState::Visualization3D), (setup_3d_scene, setup_audio_playback))
-        .add_systems(OnEnter(AppState::Visualization2D), (setup_2d_scene, setup_audio_playback))
+        // Systems for visualization states
+        .add_systems(OnEnter(AppState::Visualization3D), (setup_3d_scene, play_audio_file))
+        .add_systems(OnEnter(AppState::Visualization2D), (setup_2d_scene, play_audio_file))
 
         .run();
 }
 
+
 // --- Audio System ---
 
-/// Loads and plays a hardcoded audio file using rodio.
-/// This system runs when entering a visualization state.
-fn setup_audio_playback(mut commands: Commands) {
-    // Get an output stream handle to the default physical sound device.
-    // This must be done on the main thread.
-    let (stream, stream_handle) = OutputStream::try_default().unwrap();
-
-    // Create a Sink to play the sound. The sink is what actually plays the audio.
-    let sink = Sink::try_new(&stream_handle).unwrap();
-
+/// Accesses the audio Sink and plays a hardcoded file.
+/// This system now expects the Sink to already exist as a NonSend resource.
+fn play_audio_file(
+    mut sink: NonSendMut<Sink>
+) {
     // Load a sound from a file.
-    // Make sure you have an `assets` folder with `music.mp3` in it.
     let file = BufReader::new(File::open("assets/music.mp3").expect("Failed to open music file"));
     let source = Decoder::new(file).unwrap();
+
+    // Clear any previous audio and append the new source.
+    sink.clear();
     sink.append(source);
     sink.play();
 
-    // The sink is detached, meaning it will play until it's done.
-    sink.detach();
-
-    // IMPORTANT: Insert the stream and sink as NonSend resources.
-    // This tells Bevy to keep them on the main thread, avoiding the error.
-    // We store them so they are not dropped, which would stop the audio.
-    commands.insert_non_send_resource(stream);
-    commands.insert_non_send_resource(sink);
+    // The sink is not detached here, as it's a resource that lives
+    // for the duration of the app.
 
     info!("Audio playback started.");
 }
