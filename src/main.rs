@@ -26,16 +26,20 @@ struct MainMenuUI;
 // --- Main Application Logic ---
 
 fn main() {
+    // --- CORRECTED: Create the audio resources BEFORE building the App ---
+    // 1. Get the stream and its handle.
     let (stream, stream_handle) = OutputStream::try_default().unwrap();
-    let sink = Sink::try_new(&stream_handle).unwrap();
 
-    // The stream must be kept alive, so we clone it to move it into the app.
-    let stream_clone = stream.clone();
+    // 2. Use the handle to create the sink.
+    let sink = Sink::try_new(&stream_handle).unwrap();
 
     App::new()
         .add_plugins(DefaultPlugins)
 
-        .insert_non_send_resource(stream_clone)
+        // 3. Move the stream and sink into the app as NonSend resources.
+        // The stream object must be kept alive, so we insert it here.
+        // There is no need to clone it.
+        .insert_non_send_resource(stream)
         .insert_non_send_resource(sink)
 
         .init_state::<AppState>()
@@ -56,27 +60,24 @@ fn main() {
 // --- Audio System ---
 
 /// Accesses the audio Sink and plays a hardcoded file.
-/// This system now expects the Sink to already exist as a NonSend resource.
 fn play_audio_file(
-    mut sink: NonSendMut<Sink>
+    // CORRECTED: Get non-mutable access to the Sink. This resolves the warning.
+    sink: NonSend<Sink>
 ) {
     // Load a sound from a file.
-    let file = BufReader::new(File::open("assets/music.mp3").expect("Failed to open music file"));
+    let file = BufReader::new(File::open("assets/ShortClip.mp3").expect("Failed to open music file"));
     let source = Decoder::new(file).unwrap();
 
-    // Clear any previous audio and append the new source.
+    // Use the sink to play the sound.
     sink.clear();
     sink.append(source);
     sink.play();
-
-    // The sink is not detached here, as it's a resource that lives
-    // for the duration of the app.
 
     info!("Audio playback started.");
 }
 
 
-// --- UI and Scene Systems (Unchanged) ---
+// --- UI and Scene Systems ---
 
 /// System that runs once when entering the MainMenu state to build the UI
 fn setup_main_menu(mut commands: Commands) {
