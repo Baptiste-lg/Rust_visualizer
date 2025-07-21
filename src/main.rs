@@ -10,7 +10,7 @@ struct AudioStream(OutputStream);
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
-        .add_systems(Startup, (setup, setup_audio_playback)) // Add our new system
+        .add_systems(Startup, (setup, setup_audio_playback))
         .run();
 }
 
@@ -40,7 +40,7 @@ fn setup_audio_playback(mut commands: Commands) {
     let (stream, stream_handle) = OutputStream::try_default().unwrap();
 
     // Load a sound from a file, using a buffered reader.
-    let file = BufReader::new(File::open("assets/music.mp3").unwrap());
+    let file = BufReader::new(File::open("Intro Gotaga !.mp3").unwrap());
 
     // Decode that sound file into a source
     let source = Decoder::new(file).unwrap();
@@ -56,5 +56,5 @@ fn setup_audio_playback(mut commands: Commands) {
     commands.insert_resource(AudioStream(stream));
 
     // Log to console to confirm it's working
-    info!("Successfully started playing assets/music.mp3");
+    info!("Successfully started playing 'Intro Gotaga !.mp3'");
 }
