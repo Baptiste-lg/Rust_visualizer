@@ -12,6 +12,10 @@ use std::{fs::File, io::BufReader, time::Instant};
 use viz_2d::Viz2DPlugin;
 use viz_3d::Viz3DPlugin;
 
+// --- NOUVEAUX IMPORTS pour CPAL ---
+use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+use std::sync::{Arc, Mutex};
+
 // --- Enums and Structs ---
 #[derive(States, Debug, Clone, PartialEq, Eq, Hash, Default)]
 pub enum AppState {
@@ -48,6 +52,11 @@ pub struct AudioAnalysis {
     pub treble: f32,
 }
 
+// --- NOUVELLE RESSOURCE POUR LE FLUX DU MICROPHONE ---
+#[derive(Resource)]
+struct MicStream(cpal::Stream);
+
+
 // --- Main Application Logic ---
 fn main() {
     let (stream, stream_handle) = OutputStream::try_default().unwrap();
@@ -61,20 +70,85 @@ fn main() {
         .init_resource::<AudioAnalysis>()
         .init_state::<AppState>()
 
-        // Ajout des deux plugins
         .add_plugins(Viz2DPlugin)
-        .add_plugins(Viz3DPlugin) // Ajout du plugin 3D
+        .add_plugins(Viz3DPlugin)
+
+        // --- AJOUT DU SYSTÈME D'INITIALISATION DU MICROPHONE ---
+        // Ce système s'exécute une seule fois au démarrage de l'application.
+        .add_systems(Startup, setup_microphone)
 
         .add_systems(OnEnter(AppState::MainMenu), setup_main_menu)
         .add_systems(Update, menu_button_interaction.run_if(in_state(AppState::MainMenu)))
         .add_systems(OnExit(AppState::MainMenu), cleanup_menu)
 
-        // Organisation des systèmes pour chaque état
         .add_systems(OnEnter(AppState::Visualization2D), play_audio_file)
-        .add_systems(OnEnter(AppState::Visualization3D), (play_audio_file, setup_3d_scene)) // setup_3d_scene installe la caméra/lumière
+        .add_systems(OnEnter(AppState::Visualization3D), (play_audio_file, setup_3d_scene))
         .add_systems(Update, audio_analysis_system.run_if(in_state(AppState::Visualization2D).or_else(in_state(AppState::Visualization3D))))
 
         .run();
+}
+
+
+// --- NOUVEAU SYSTÈME POUR LE MICROPHONE ---
+
+/// Initialise le flux d'entrée du microphone par défaut en utilisant cpal.
+fn setup_microphone(mut commands: Commands) {
+    // Obtenir l'hôte audio par défaut
+    let host = cpal::default_host();
+
+    // Obtenir le périphérique d'entrée par défaut
+    let device = host.default_input_device().expect("Aucun périphérique d'entrée audio trouvé");
+    info!("Périphérique d'entrée audio: {}", device.name().unwrap_or_else(|_| "Nom inconnu".into()));
+
+    // Obtenir la configuration de flux par défaut
+    let config = device.default_input_config().expect("Impossible d'obtenir la configuration d'entrée par défaut");
+    info!("Configuration d'entrée par défaut: {:?}", config);
+
+    // Le canal où nous enverrons les données audio
+    let (tx, rx) = std::sync::mpsc::channel::<Vec<f32>>();
+
+    // Créer le flux audio
+    let stream = device.build_input_stream(
+        &config.into(),
+        move |data: &[f32], _: &cpal::InputCallbackInfo| {
+            // Envoyer les données du tampon au thread principal via le canal
+            // Nous clonons les données pour les envoyer à travers le canal
+            tx.send(data.to_vec()).unwrap();
+        },
+        |err| {
+            // Gérer les erreurs de flux
+            error!("Une erreur est survenue sur le flux audio: {}", err);
+        },
+        None // Optionnel : timeout
+    ).expect("Impossible de construire le flux d'entrée");
+
+    // Démarrer le flux
+    stream.play().expect("Impossible de démarrer le flux audio");
+
+    // Insérer le flux en tant que ressource pour qu'il ne soit pas détruit
+    commands.insert_resource(MicStream(stream));
+
+    // Démarrer un thread séparé pour écouter les données audio et les afficher
+    std::thread::spawn(move || {
+        info!("Le thread d'écoute du microphone a démarré.");
+        loop {
+            match rx.recv() {
+                Ok(buffer) => {
+                    // Calculer le volume moyen pour vérification
+                    let sum: f32 = buffer.iter().map(|&x| x.abs()).sum();
+                    let avg_volume = sum / buffer.len() as f32;
+                    // Afficher la confirmation dans la console
+                    info!("[Microphone] Données reçues. Longueur du tampon: {}, Volume moyen: {:.4}", buffer.len(), avg_volume);
+                }
+                Err(e) => {
+                    error!("Erreur lors de la réception des données du microphone: {}", e);
+                    break;
+                }
+            }
+        }
+    });
+
+    info!("Capture du microphone initialisée avec succès.");
 }
 
 
