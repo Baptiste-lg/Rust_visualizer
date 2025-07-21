@@ -1,9 +1,16 @@
 use bevy::prelude::*;
+use rodio::{Decoder, OutputStream, Sink}; // Import rodio components
+use std::fs::File;
+use std::io::BufReader;
+
+// This resource will hold the audio output stream, keeping it alive.
+#[derive(Resource)]
+struct AudioStream(OutputStream);
 
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
-        .add_systems(Startup, setup)
+        .add_systems(Startup, (setup, setup_audio_playback)) // Add our new system
         .run();
 }
 
@@ -25,4 +32,29 @@ fn setup(mut commands: Commands) {
         transform: Transform::from_xyz(4.0, 8.0, 4.0),
         ..default()
     });
+}
+
+/// Loads and plays a hardcoded audio file using rodio.
+fn setup_audio_playback(mut commands: Commands) {
+    // Get an output stream handle to the default physical sound device
+    let (stream, stream_handle) = OutputStream::try_default().unwrap();
+
+    // Load a sound from a file, using a buffered reader.
+    let file = BufReader::new(File::open("assets/music.mp3").unwrap());
+
+    // Decode that sound file into a source
+    let source = Decoder::new(file).unwrap();
+
+    // Create a Sink to play the sound
+    let sink = Sink::try_new(&stream_handle).unwrap();
+    sink.append(source);
+    sink.play();
+
+    // The sink is detached here, meaning it will play until it is done.
+    // We must store the output stream to keep it alive.
+    sink.detach();
+    commands.insert_resource(AudioStream(stream));
+
+    // Log to console to confirm it's working
+    info!("Successfully started playing assets/music.mp3");
 }
