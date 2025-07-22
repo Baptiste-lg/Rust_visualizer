@@ -136,7 +136,6 @@ fn audio_analysis_system(
     let Some(audio_info) = audio_info else { return };
     let fft_size = 4096;
 
-    // **THE FIX**: The logic is restructured to ensure we only return `()` and not a value.
     let samples_slice: Cow<[f32]> = match audio_source.0 {
         AudioSource::File => {
             if let Some(start_time) = start_time {
@@ -146,7 +145,7 @@ fn audio_analysis_system(
                 if current_sample_index + fft_size > audio_samples.0.len() { return; }
                 Cow::from(&audio_samples.0[current_sample_index..current_sample_index + fft_size])
             } else {
-                return; // Return early if start_time isn't available
+                return;
             }
         },
         AudioSource::Microphone => {
@@ -183,4 +182,11 @@ fn audio_analysis_system(
     audio_analysis.bass = audio_analysis.bass * smoothing + (bass_val * 1.5) * (1.0 - smoothing);
     audio_analysis.mid = audio_analysis.mid * smoothing + (mid_val * 1.5) * (1.0 - smoothing);
     audio_analysis.treble = audio_analysis.treble * smoothing + (treble_val * 1.5) * (1.0 - smoothing);
+
+    info!(
+        "Audio Analysis -- Bass: {:.4}, Mid: {:.4}, Treble: {:.4}",
+        audio_analysis.bass,
+        audio_analysis.mid,
+        audio_analysis.treble
+    );
 }

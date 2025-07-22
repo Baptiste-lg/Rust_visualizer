@@ -43,8 +43,7 @@ fn main() {
         .run();
 }
 
-/// A simple plugin to set up the basic 3D scene (camera and light).
-/// This avoids repeating code for different visualization states.
+/// A plugin to set up the basic 3D scene (camera and light).
 pub struct ScenePlugin;
 impl Plugin for ScenePlugin {
     fn build(&self, app: &mut App) {
