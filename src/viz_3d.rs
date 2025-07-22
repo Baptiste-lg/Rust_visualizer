@@ -1,7 +1,7 @@
 // src/viz_3d.rs
 
 use bevy::prelude::*;
-use crate::{AppState, AudioAnalysis}; // Import shared data from main.rs
+use crate::{AppState, audio::AudioAnalysis}; // Import shared data from main.rs
 
 // The plugin for our 3D visualization
 pub struct Viz3DPlugin;
