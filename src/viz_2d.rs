@@ -1,7 +1,7 @@
 // src/viz_2d.rs
 
 use bevy::prelude::*;
-use crate::{AppState, AudioAnalysis}; // Import shared data from main.rs
+use crate::{AppState, audio::AudioAnalysis}; // Import shared data from main.rs
 
 pub struct Viz2DPlugin;
 
