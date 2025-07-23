@@ -2,6 +2,7 @@
 
 use bevy::prelude::*;
 use crate::{AppState, audio::AudioAnalysis}; // Import shared data from main.rs
+use crate::audio::audio_analysis_system;
 
 // The plugin for our 3D visualization
 pub struct Viz3DPlugin;
@@ -9,9 +10,11 @@ pub struct Viz3DPlugin;
 impl Plugin for Viz3DPlugin {
     fn build(&self, app: &mut App) {
         app
-            // Add our systems to run only in the 3D visualization state
             .add_systems(OnEnter(AppState::Visualization3D), setup_3d_visuals)
-            .add_systems(Update, update_3d_visuals.run_if(in_state(AppState::Visualization3D)));
+            .add_systems(Update, update_3d_visuals
+                .after(audio_analysis_system) // S'assure que l'analyse est faite avant
+                .run_if(in_state(AppState::Visualization3D))
+            );
     }
 }
 
