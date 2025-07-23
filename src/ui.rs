@@ -18,7 +18,6 @@ impl Plugin for UiPlugin {
             .add_systems(OnEnter(AppState::MicSelection), setup_mic_selection_menu)
             .add_systems(Update, mic_selection_interaction.run_if(in_state(AppState::MicSelection)))
             .add_systems(OnExit(AppState::MicSelection), cleanup_menu)
-            // Add the new UI system for the visualizer
             .add_systems(
                 Update,
                 visualizer_ui_system
@@ -29,10 +28,8 @@ impl Plugin for UiPlugin {
 
 #[derive(Component)]
 enum MenuButtonAction {
-    Start3DFile,
-    Start2DFile,
-    Start3DMic,
-    Start2DMic,
+    Start3D,
+    Start2D,
     ToMicSelection,
 }
 #[derive(Component)]
@@ -52,36 +49,23 @@ fn setup_main_menu(mut commands: Commands) {
             },
             ..default()
         }, MainMenuUI)).with_children(|parent| {
-        create_menu_button(parent, "Start 3D (File)", MenuButtonAction::Start3DFile);
-        create_menu_button(parent, "Start 2D (File)", MenuButtonAction::Start2DFile);
-        create_menu_button(parent, "Start 3D (Mic)", MenuButtonAction::Start3DMic);
-        create_menu_button(parent, "Start 2D (Mic)", MenuButtonAction::Start2DMic);
+        create_menu_button(parent, "Start 3D", MenuButtonAction::Start3D);
+        create_menu_button(parent, "Start 2D", MenuButtonAction::Start2D);
         create_menu_button(parent, "Select Microphone", MenuButtonAction::ToMicSelection);
     });
 }
 
 fn menu_button_interaction(
-    mut commands: Commands,
     mut button_query: Query<(&Interaction, &MenuButtonAction), (Changed<Interaction>, With<Button>)>,
     mut next_app_state: ResMut<NextState<AppState>>,
 ) {
     for (interaction, action) in &mut button_query {
         if *interaction == Interaction::Pressed {
             match action {
-                MenuButtonAction::Start3DFile => {
-                    commands.insert_resource(SelectedAudioSource(AudioSource::File));
+                MenuButtonAction::Start3D => {
                     next_app_state.set(AppState::Visualization3D);
                 }
-                MenuButtonAction::Start2DFile => {
-                    commands.insert_resource(SelectedAudioSource(AudioSource::File));
-                    next_app_state.set(AppState::Visualization2D);
-                }
-                MenuButtonAction::Start3DMic => {
-                    commands.insert_resource(SelectedAudioSource(AudioSource::Microphone));
-                    next_app_state.set(AppState::Visualization3D);
-                }
-                MenuButtonAction::Start2DMic => {
-                    commands.insert_resource(SelectedAudioSource(AudioSource::Microphone));
+                MenuButtonAction::Start2D => {
                     next_app_state.set(AppState::Visualization2D);
                 }
                 MenuButtonAction::ToMicSelection => {
@@ -155,15 +139,36 @@ fn mic_selection_interaction(
     }
 }
 
-// NEW: System to create the visualizer's UI
 fn visualizer_ui_system(
     mut contexts: EguiContexts,
     mut config: ResMut<VisualsConfig>,
+    mut selected_source: ResMut<SelectedAudioSource>,
 ) {
+    // Window for visual controls
     egui::Window::new("Controls").show(contexts.ctx_mut(), |ui| {
         ui.label("Bass Sensitivity");
-        // Add a slider to control the bass sensitivity
         ui.add(egui::Slider::new(&mut config.bass_sensitivity, 0.0..=20.0));
+    });
+
+    // Window for audio source selection
+    egui::Window::new("Audio Source").show(contexts.ctx_mut(), |ui| {
+        ui.label("Current Source:");
+        ui.label(format!("{:?}", selected_source.0)); // Display current source for clarity
+
+        ui.separator();
+
+        if ui.button("Use Microphone").clicked() {
+            selected_source.0 = AudioSource::Microphone;
+        }
+
+        if ui.button("Choose Audio File").clicked() {
+            if let Some(path) = rfd::FileDialog::new()
+                .add_filter("audio", &["mp3", "wav"])
+                .pick_file()
+            {
+                selected_source.0 = AudioSource::File(path);
+            }
+        }
     });
 }
 

@@ -9,20 +9,19 @@ mod config;
 
 // --- Plugin Imports ---
 use crate::config::VisualsConfig;
-use audio::AudioPlugin;
+use audio::{AudioPlugin, SelectedAudioSource, MicStream};
 use bevy::prelude::*;
+use bevy_egui::EguiPlugin;
 use rodio::{OutputStream, Sink};
 use ui::UiPlugin;
 use viz_2d::Viz2DPlugin;
 use viz_3d::Viz3DPlugin;
-use bevy_egui::EguiPlugin;
 
-/// The global state of the application, shared between modules.
 #[derive(States, Debug, Clone, PartialEq, Eq, Hash, Default)]
 pub enum AppState {
     #[default]
     MainMenu,
-    MicSelection, // State for the new microphone selection menu
+    MicSelection,
     Visualization3D,
     Visualization2D,
 }
@@ -30,13 +29,12 @@ pub enum AppState {
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
-        // Rodio resources must be inserted here as they are not `Send`
         .insert_non_send_resource(OutputStream::try_default().unwrap())
         .insert_non_send_resource(Sink::try_new(&OutputStream::try_default().unwrap().1).unwrap())
+        .insert_non_send_resource(MicStream(None)) // Resource to hold the microphone stream
         .init_resource::<VisualsConfig>()
-        // Initialize the application state
+        .init_resource::<SelectedAudioSource>() // Will default to AudioSource::None
         .init_state::<AppState>()
-        // Add all of our plugins
         .add_plugins((
             EguiPlugin,
             AudioPlugin,
@@ -48,7 +46,6 @@ fn main() {
         .run();
 }
 
-/// A plugin to set up the basic 3D scene (camera and light).
 pub struct ScenePlugin;
 impl Plugin for ScenePlugin {
     fn build(&self, app: &mut App) {
@@ -59,7 +56,6 @@ impl Plugin for ScenePlugin {
     }
 }
 
-/// This system spawns the 3D camera and a point light.
 fn setup_3d_scene(mut commands: Commands) {
     info!("Setting up 3D scene...");
     commands.spawn(Camera3dBundle {
