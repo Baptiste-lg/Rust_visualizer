@@ -1,11 +1,12 @@
 // src/ui.rs
 
 use bevy::prelude::*;
+use bevy_egui::{egui, EguiContexts};
 use crate::audio::{AudioSource, SelectedAudioSource, SelectedMic};
+use crate::config::VisualsConfig;
 use crate::AppState;
 use cpal::traits::{DeviceTrait, HostTrait};
 
-/// The plugin that encapsulates all UI logic.
 pub struct UiPlugin;
 
 impl Plugin for UiPlugin {
@@ -14,14 +15,17 @@ impl Plugin for UiPlugin {
             .add_systems(OnEnter(AppState::MainMenu), setup_main_menu)
             .add_systems(Update, menu_button_interaction.run_if(in_state(AppState::MainMenu)))
             .add_systems(OnExit(AppState::MainMenu), cleanup_menu)
-            // Systems for the new microphone selection menu
             .add_systems(OnEnter(AppState::MicSelection), setup_mic_selection_menu)
             .add_systems(Update, mic_selection_interaction.run_if(in_state(AppState::MicSelection)))
-            .add_systems(OnExit(AppState::MicSelection), cleanup_menu);
+            .add_systems(OnExit(AppState::MicSelection), cleanup_menu)
+            // Add the new UI system for the visualizer
+            .add_systems(
+                Update,
+                visualizer_ui_system
+                    .run_if(in_state(AppState::Visualization2D).or_else(in_state(AppState::Visualization3D)))
+            );
     }
 }
-
-// --- UI Components ---
 
 #[derive(Component)]
 enum MenuButtonAction {
@@ -37,9 +41,6 @@ struct MainMenuUI;
 struct MicDeviceButton(String);
 
 
-// --- UI Systems ---
-
-/// Spawns the main menu buttons.
 fn setup_main_menu(mut commands: Commands) {
     commands.spawn((Camera2dBundle::default(), MainMenuUI));
     commands.spawn((NodeBundle {
@@ -59,7 +60,6 @@ fn setup_main_menu(mut commands: Commands) {
     });
 }
 
-/// Handles interactions with the main menu buttons.
 fn menu_button_interaction(
     mut commands: Commands,
     mut button_query: Query<(&Interaction, &MenuButtonAction), (Changed<Interaction>, With<Button>)>,
@@ -92,7 +92,6 @@ fn menu_button_interaction(
     }
 }
 
-/// Spawns the microphone selection menu.
 fn setup_mic_selection_menu(mut commands: Commands) {
     info!("Opening microphone selection menu...");
     commands.spawn((Camera2dBundle::default(), MainMenuUI));
@@ -113,11 +112,9 @@ fn setup_mic_selection_menu(mut commands: Commands) {
         ));
     });
 
-    // Step 1: Get the list of available input devices.
     let host = cpal::default_host();
     if let Ok(devices) = host.input_devices() {
         root.with_children(|parent| {
-            // Step 2: Create a button for each device.
             for device in devices {
                 if let Ok(name) = device.name() {
                     info!("Found device: {}", name);
@@ -144,7 +141,6 @@ fn setup_mic_selection_menu(mut commands: Commands) {
     }
 }
 
-/// Handles interactions with the microphone selection buttons.
 fn mic_selection_interaction(
     mut button_query: Query<(&Interaction, &MicDeviceButton)>,
     mut selected_mic: ResMut<SelectedMic>,
@@ -159,7 +155,19 @@ fn mic_selection_interaction(
     }
 }
 
-/// A generic helper function to create a menu button.
+// NEW: System to create the visualizer's UI
+fn visualizer_ui_system(
+    mut contexts: EguiContexts,
+    mut config: ResMut<VisualsConfig>,
+) {
+    egui::Window::new("Controls").show(contexts.ctx_mut(), |ui| {
+        ui.label("Bass Sensitivity");
+        // Add a slider to control the bass sensitivity
+        ui.add(egui::Slider::new(&mut config.bass_sensitivity, 0.0..=20.0));
+    });
+}
+
+
 fn create_menu_button(parent: &mut ChildBuilder, text: &str, action: MenuButtonAction) {
     parent.spawn((
             ButtonBundle {
@@ -180,7 +188,6 @@ fn create_menu_button(parent: &mut ChildBuilder, text: &str, action: MenuButtonA
         });
 }
 
-/// A generic cleanup system for any menu UI.
 fn cleanup_menu(mut commands: Commands, ui_query: Query<Entity, With<MainMenuUI>>) {
     info!("Cleaning up menu UI...");
     for entity in ui_query.iter() {
