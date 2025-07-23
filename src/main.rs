@@ -5,14 +5,17 @@ mod audio;
 mod ui;
 mod viz_2d;
 mod viz_3d;
+mod config;
 
 // --- Plugin Imports ---
+use crate::config::VisualsConfig;
 use audio::AudioPlugin;
 use bevy::prelude::*;
 use rodio::{OutputStream, Sink};
 use ui::UiPlugin;
 use viz_2d::Viz2DPlugin;
 use viz_3d::Viz3DPlugin;
+use bevy_egui::EguiPlugin;
 
 /// The global state of the application, shared between modules.
 #[derive(States, Debug, Clone, PartialEq, Eq, Hash, Default)]
@@ -30,15 +33,17 @@ fn main() {
         // Rodio resources must be inserted here as they are not `Send`
         .insert_non_send_resource(OutputStream::try_default().unwrap())
         .insert_non_send_resource(Sink::try_new(&OutputStream::try_default().unwrap().1).unwrap())
+        .init_resource::<VisualsConfig>()
         // Initialize the application state
         .init_state::<AppState>()
         // Add all of our plugins
         .add_plugins((
+            EguiPlugin,
             AudioPlugin,
             UiPlugin,
             Viz2DPlugin,
             Viz3DPlugin,
-            ScenePlugin, // Basic 3D scene setup plugin
+            ScenePlugin,
         ))
         .run();
 }
