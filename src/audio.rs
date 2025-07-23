@@ -10,14 +10,22 @@ use std::io::BufReader;
 use std::sync::mpsc::{Receiver, Sender};
 use crate::AppState;
 use std::path::PathBuf;
+use std::time::Duration; // Import Duration
 
 pub struct AudioPlugin;
+
+// A resource to hold our analysis timer
+#[derive(Resource)]
+struct AnalysisTimer(Timer);
 
 impl Plugin for AudioPlugin {
     fn build(&self, app: &mut App) {
         let (mic_tx, mic_rx) = std::sync::mpsc::channel::<Vec<f32>>();
 
         app
+            // Run analysis 20 times per second. This is plenty for smooth visuals
+            // without overwhelming the CPU.
+            .insert_resource(AnalysisTimer(Timer::new(Duration::from_secs_f32(1.0 / 20.0), TimerMode::Repeating)))
             .insert_resource(MicAudioSender(mic_tx))
             .insert_non_send_resource(MicAudioReceiver(mic_rx))
             .init_resource::<AudioSamples>()
@@ -36,7 +44,6 @@ impl Plugin for AudioPlugin {
     }
 }
 
-// --- Audio-related structs and enums ---
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AudioSource {
@@ -57,7 +64,10 @@ pub struct SelectedMic(pub Option<String>);
 #[derive(Resource, Clone)]
 pub struct MicAudioSender(pub Sender<Vec<f32>>);
 pub struct MicAudioReceiver(pub Receiver<Vec<f32>>);
+
+#[allow(dead_code)]
 pub struct MicStream(pub Option<cpal::Stream>);
+
 #[derive(Resource, Default)]
 pub struct MicAudioBuffer(pub Vec<f32>);
 #[derive(Resource, Default, Clone)]
@@ -69,8 +79,6 @@ pub struct PlaybackStartTime(pub std::time::Instant);
 #[derive(Resource, Default)]
 pub struct AudioAnalysis { pub bass: f32, pub mid: f32, pub treble: f32 }
 
-
-// --- Audio Systems ---
 
 fn manage_audio_playback(
     mut commands: Commands,
@@ -85,9 +93,8 @@ fn manage_audio_playback(
         return;
     }
 
-    // Stop all current audio before starting a new source
     sink.stop();
-    *mic_stream = MicStream(None); // This drops the old stream, stopping mic capture
+    *mic_stream = MicStream(None);
 
     match &selected_source.0 {
         AudioSource::File(path) => {
@@ -123,11 +130,10 @@ fn manage_audio_playback(
                 None
             ).expect("Failed to build input stream");
             stream.play().expect("Failed to play audio stream");
-            *mic_stream = MicStream(Some(stream)); // Store the new stream
+            *mic_stream = MicStream(Some(stream));
         }
         AudioSource::None => {
             info!("Stopping all audio");
-            // Audio was already stopped above
         }
     }
 }
@@ -141,7 +147,10 @@ pub fn read_mic_data_system(receiver: Option<NonSend<MicAudioReceiver>>, mut buf
     }
 }
 
+// UPDATED: Now uses a timer to run at a fixed interval
 pub fn audio_analysis_system(
+    time: Res<Time>,
+    mut analysis_timer: ResMut<AnalysisTimer>,
     mut audio_analysis: ResMut<AudioAnalysis>,
     audio_info: Option<Res<AudioInfo>>,
     audio_source: Res<SelectedAudioSource>,
@@ -149,6 +158,12 @@ pub fn audio_analysis_system(
     start_time: Option<Res<PlaybackStartTime>>,
     mut mic_buffer: ResMut<MicAudioBuffer>,
 ) {
+    // Tick the timer and only run the analysis when it finishes
+    analysis_timer.0.tick(time.delta());
+    if !analysis_timer.0.just_finished() {
+        return;
+    }
+
     let Some(audio_info) = audio_info else { return };
     let fft_size = 4096;
 
