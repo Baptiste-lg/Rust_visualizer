@@ -43,7 +43,7 @@ impl Plugin for AudioPlugin {
                 Update,
                 (
                     read_mic_data_system.run_if(|source: Res<SelectedAudioSource>| source.0 == AudioSource::Microphone),
-                    audio_analysis_system,
+                    audio_analysis_system.after(read_mic_data_system),
                 )
                 .run_if(in_state(AppState::Visualization2D).or_else(in_state(AppState::Visualization3D)))
             );
@@ -102,7 +102,7 @@ fn setup_microphone(
     info!("Microphone capture started.");
 }
 
-fn read_mic_data_system(receiver: Option<NonSend<MicAudioReceiver>>, mut buffer: ResMut<MicAudioBuffer>) {
+pub fn read_mic_data_system(receiver: Option<NonSend<MicAudioReceiver>>, mut buffer: ResMut<MicAudioBuffer>) {
     if let Some(receiver) = receiver {
         for new_data in receiver.0.try_iter() {
             buffer.0.extend(new_data);
@@ -125,7 +125,7 @@ fn play_audio_file(mut commands: Commands, sink: NonSend<Sink>, mut audio_sample
     info!("Audio file loaded and playback started.");
 }
 
-fn audio_analysis_system(
+pub fn audio_analysis_system(
     mut audio_analysis: ResMut<AudioAnalysis>,
     audio_info: Option<Res<AudioInfo>>,
     audio_source: Res<SelectedAudioSource>,
