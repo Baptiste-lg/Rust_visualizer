@@ -9,8 +9,8 @@ use std::fs::File;
 use std::io::BufReader;
 use std::sync::mpsc::{Receiver, Sender};
 use crate::AppState;
+use std::path::PathBuf;
 
-/// The plugin that encapsulates all audio logic.
 pub struct AudioPlugin;
 
 impl Plugin for AudioPlugin {
@@ -22,46 +22,42 @@ impl Plugin for AudioPlugin {
             .insert_non_send_resource(MicAudioReceiver(mic_rx))
             .init_resource::<AudioSamples>()
             .init_resource::<AudioAnalysis>()
-            .init_resource::<SelectedAudioSource>()
-            .init_resource::<MicAudioBuffer>()
             .init_resource::<SelectedMic>()
-            .add_systems(
-                OnEnter(AppState::Visualization2D),
-                (
-                    play_audio_file.run_if(|source: Res<SelectedAudioSource>| source.0 == AudioSource::File),
-                    setup_microphone.run_if(|source: Res<SelectedAudioSource>| source.0 == AudioSource::Microphone),
-                )
-            )
-            .add_systems(
-                OnEnter(AppState::Visualization3D),
-                (
-                    play_audio_file.run_if(|source: Res<SelectedAudioSource>| source.0 == AudioSource::File),
-                    setup_microphone.run_if(|source: Res<SelectedAudioSource>| source.0 == AudioSource::Microphone),
-                )
-            )
+            .init_resource::<MicAudioBuffer>()
             .add_systems(
                 Update,
                 (
-                    read_mic_data_system.run_if(|source: Res<SelectedAudioSource>| source.0 == AudioSource::Microphone),
-                    audio_analysis_system.after(read_mic_data_system),
+                    read_mic_data_system,
+                    manage_audio_playback,
+                    audio_analysis_system.after(read_mic_data_system).after(manage_audio_playback),
                 )
                 .run_if(in_state(AppState::Visualization2D).or_else(in_state(AppState::Visualization3D)))
             );
     }
 }
 
-
 // --- Audio-related structs and enums ---
 
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-pub enum AudioSource { #[default] File, Microphone }
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AudioSource {
+    File(PathBuf),
+    Microphone,
+    None,
+}
+
+impl Default for AudioSource {
+    fn default() -> Self { AudioSource::None }
+}
+
 #[derive(Resource, Default)]
 pub struct SelectedAudioSource(pub AudioSource);
+
 #[derive(Resource, Default)]
 pub struct SelectedMic(pub Option<String>);
 #[derive(Resource, Clone)]
 pub struct MicAudioSender(pub Sender<Vec<f32>>);
 pub struct MicAudioReceiver(pub Receiver<Vec<f32>>);
+pub struct MicStream(pub Option<cpal::Stream>);
 #[derive(Resource, Default)]
 pub struct MicAudioBuffer(pub Vec<f32>);
 #[derive(Resource, Default, Clone)]
@@ -76,31 +72,66 @@ pub struct AudioAnalysis { pub bass: f32, pub mid: f32, pub treble: f32 }
 
 // --- Audio Systems ---
 
-fn setup_microphone(
+fn manage_audio_playback(
     mut commands: Commands,
+    selected_source: Res<SelectedAudioSource>,
+    sink: NonSend<Sink>,
+    mut mic_stream: NonSendMut<MicStream>,
     mic_sender: Res<MicAudioSender>,
     selected_mic: Res<SelectedMic>,
-) {
-    let host = cpal::default_host();
-    let device = selected_mic.0.as_ref().and_then(|name| {
-        host.input_devices().ok()?.find(|d| d.name().unwrap_or_default() == *name)
-    }).unwrap_or_else(|| {
-        host.default_input_device().expect("No default audio input device found")
-    });
-    let config = device.default_input_config().expect("Failed to get default input config");
-    info!("Initializing microphone: {} with config {:?}", device.name().unwrap(), config);
-    commands.insert_resource(AudioInfo { sample_rate: config.sample_rate().0 });
-    let tx = mic_sender.0.clone();
-    let stream = device.build_input_stream(
-        &config.into(),
-        move |data: &[f32], _: &cpal::InputCallbackInfo| { tx.send(data.to_vec()).ok(); },
-        |err| error!("An error occurred on the audio stream: {}", err),
-        None
-    ).expect("Failed to build input stream");
-    stream.play().expect("Failed to play audio stream");
-    std::mem::forget(stream);
-    info!("Microphone capture started.");
+    mut audio_samples: ResMut<AudioSamples>,
+){
+    if !selected_source.is_changed() {
+        return;
+    }
+
+    // Stop all current audio before starting a new source
+    sink.stop();
+    *mic_stream = MicStream(None); // This drops the old stream, stopping mic capture
+
+    match &selected_source.0 {
+        AudioSource::File(path) => {
+            info!("Playing audio file: {:?}", path);
+            let file = BufReader::new(File::open(path).expect("Failed to open music file"));
+            let source = Decoder::new(file).unwrap();
+            let sample_rate = source.sample_rate();
+            commands.insert_resource(AudioInfo { sample_rate });
+            let samples: Vec<f32> = source.convert_samples::<f32>().collect();
+            audio_samples.0 = samples;
+            let new_source = rodio::buffer::SamplesBuffer::new(1, sample_rate, audio_samples.0.clone());
+            sink.clear();
+            sink.append(new_source);
+            sink.play();
+            commands.insert_resource(PlaybackStartTime(std::time::Instant::now()));
+        }
+        AudioSource::Microphone => {
+            info!("Starting microphone capture");
+            let host = cpal::default_host();
+            let device = selected_mic.0.as_ref().and_then(|name| {
+                host.input_devices().ok()?.find(|d| d.name().unwrap_or_default() == *name)
+            }).unwrap_or_else(|| {
+                host.default_input_device().expect("No default audio input device found")
+            });
+            let config = device.default_input_config().expect("Failed to get default input config");
+            info!("Initializing microphone: {} with config {:?}", device.name().unwrap(), config);
+            commands.insert_resource(AudioInfo { sample_rate: config.sample_rate().0 });
+            let tx = mic_sender.0.clone();
+            let stream = device.build_input_stream(
+                &config.into(),
+                move |data: &[f32], _: &cpal::InputCallbackInfo| { tx.send(data.to_vec()).ok(); },
+                |err| error!("An error occurred on the audio stream: {}", err),
+                None
+            ).expect("Failed to build input stream");
+            stream.play().expect("Failed to play audio stream");
+            *mic_stream = MicStream(Some(stream)); // Store the new stream
+        }
+        AudioSource::None => {
+            info!("Stopping all audio");
+            // Audio was already stopped above
+        }
+    }
 }
+
 
 pub fn read_mic_data_system(receiver: Option<NonSend<MicAudioReceiver>>, mut buffer: ResMut<MicAudioBuffer>) {
     if let Some(receiver) = receiver {
@@ -108,21 +139,6 @@ pub fn read_mic_data_system(receiver: Option<NonSend<MicAudioReceiver>>, mut buf
             buffer.0.extend(new_data);
         }
     }
-}
-
-fn play_audio_file(mut commands: Commands, sink: NonSend<Sink>, mut audio_samples: ResMut<AudioSamples>) {
-    let file = BufReader::new(File::open("assets/ShortClip.mp3").expect("Failed to open music file"));
-    let source = Decoder::new(file).unwrap();
-    let sample_rate = source.sample_rate();
-    commands.insert_resource(AudioInfo { sample_rate });
-    let samples: Vec<f32> = source.convert_samples::<f32>().collect();
-    audio_samples.0 = samples;
-    let new_source = rodio::buffer::SamplesBuffer::new(1, sample_rate, audio_samples.0.clone());
-    sink.clear();
-    sink.append(new_source);
-    sink.play();
-    commands.insert_resource(PlaybackStartTime(std::time::Instant::now()));
-    info!("Audio file loaded and playback started.");
 }
 
 pub fn audio_analysis_system(
@@ -136,8 +152,8 @@ pub fn audio_analysis_system(
     let Some(audio_info) = audio_info else { return };
     let fft_size = 4096;
 
-    let samples_slice: Cow<[f32]> = match audio_source.0 {
-        AudioSource::File => {
+    let samples_slice: Cow<[f32]> = match &audio_source.0 {
+        AudioSource::File(_) => {
             if let Some(start_time) = start_time {
                 if audio_samples.0.is_empty() { return; }
                 let elapsed = start_time.0.elapsed().as_secs_f32();
@@ -158,6 +174,7 @@ pub fn audio_analysis_system(
             mic_buffer.0.drain(0..drain_amount);
             Cow::from(analysis_vec)
         }
+        AudioSource::None => return,
     };
 
     if samples_slice.is_empty() { return; }
@@ -182,11 +199,4 @@ pub fn audio_analysis_system(
     audio_analysis.bass = audio_analysis.bass * smoothing + (bass_val * 1.5) * (1.0 - smoothing);
     audio_analysis.mid = audio_analysis.mid * smoothing + (mid_val * 1.5) * (1.0 - smoothing);
     audio_analysis.treble = audio_analysis.treble * smoothing + (treble_val * 1.5) * (1.0 - smoothing);
-
-    info!(
-        "Audio Analysis -- Bass: {:.4}, Mid: {:.4}, Treble: {:.4}",
-        audio_analysis.bass,
-        audio_analysis.mid,
-        audio_analysis.treble
-    );
 }
