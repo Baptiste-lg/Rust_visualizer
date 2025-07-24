@@ -8,13 +8,13 @@ use std::borrow::Cow;
 use std::fs::File;
 use std::io::BufReader;
 use std::sync::mpsc::{Receiver, Sender};
-use crate::AppState;
+use crate::{AppState, VisualizationEnabled}; // MODIFIED: Import VisualizationEnabled
 use std::path::PathBuf;
 use std::time::Duration;
+use std::collections::VecDeque;
 
 pub struct AudioPlugin;
 
-// FIX: Made this struct public so other modules can see it.
 #[derive(Resource)]
 pub struct AnalysisTimer(pub Timer);
 
@@ -35,7 +35,11 @@ impl Plugin for AudioPlugin {
                 (
                     read_mic_data_system,
                     manage_audio_playback,
-                    audio_analysis_system.after(read_mic_data_system).after(manage_audio_playback),
+                    audio_analysis_system
+                        .after(read_mic_data_system)
+                        .after(manage_audio_playback)
+                        // MODIFIED: Only run analysis if the visualizer is enabled
+                        .run_if(|viz_enabled: Res<VisualizationEnabled>| viz_enabled.0),
                 )
                 .run_if(in_state(AppState::Visualization2D).or_else(in_state(AppState::Visualization3D)))
             );
@@ -63,11 +67,10 @@ pub struct SelectedMic(pub Option<String>);
 pub struct MicAudioSender(pub Sender<Vec<f32>>);
 pub struct MicAudioReceiver(pub Receiver<Vec<f32>>);
 
-#[allow(dead_code)]
 pub struct MicStream(pub Option<cpal::Stream>);
 
 #[derive(Resource, Default)]
-pub struct MicAudioBuffer(pub Vec<f32>);
+pub struct MicAudioBuffer(pub VecDeque<f32>);
 #[derive(Resource, Default, Clone)]
 pub struct AudioSamples(pub Vec<f32>);
 #[derive(Resource)]
@@ -179,10 +182,9 @@ pub fn audio_analysis_system(
             if mic_buffer.0.len() < fft_size {
                 return;
             }
-            let buffer_len = mic_buffer.0.len();
-            let analysis_vec = mic_buffer.0[buffer_len - fft_size..].to_vec();
-            let drain_amount = buffer_len - (fft_size / 2);
-            mic_buffer.0.drain(0..drain_amount);
+            let analysis_vec: Vec<f32> = mic_buffer.0.iter().take(fft_size).copied().collect();
+            let drain_amount = mic_buffer.0.len().saturating_sub(fft_size / 2);
+            mic_buffer.0.drain(..drain_amount);
             Cow::from(analysis_vec)
         }
         AudioSource::None => return,
