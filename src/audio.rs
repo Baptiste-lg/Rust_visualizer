@@ -4,28 +4,63 @@ use bevy::prelude::*;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use rodio::{Decoder, Sink, source::Source};
 use spectrum_analyzer::{samples_fft_to_spectrum, scaling::divide_by_N_sqrt, windows::hann_window, FrequencyLimit};
-use std::borrow::Cow;
-use std::fs::File;
-use std::io::BufReader;
+// MODIFIED: Removed unused `Cow` import
+use std::io::Cursor;
 use std::sync::mpsc::{Receiver, Sender};
-use crate::{AppState, VisualizationEnabled}; // MODIFIED: Import VisualizationEnabled
+use crate::{AppState, VisualizationEnabled};
 use std::path::PathBuf;
 use std::time::Duration;
 use std::collections::VecDeque;
+
+struct AudioDataTee<S> {
+    source: S,
+    sender: Sender<f32>,
+}
+
+impl<S> Iterator for AudioDataTee<S>
+where
+    S: Iterator<Item = f32>,
+{
+    type Item = f32;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let sample = self.source.next()?;
+        self.sender.send(sample).ok();
+        Some(sample)
+    }
+}
+
+impl<S> Source for AudioDataTee<S>
+where
+    S: Source<Item = f32>,
+{
+    fn current_frame_len(&self) -> Option<usize> { self.source.current_frame_len() }
+    fn channels(&self) -> u16 { self.source.channels() }
+    fn sample_rate(&self) -> u32 { self.source.sample_rate() }
+    fn total_duration(&self) -> Option<Duration> { self.source.total_duration() }
+}
+
 
 pub struct AudioPlugin;
 
 #[derive(Resource)]
 pub struct AnalysisTimer(pub Timer);
 
+#[derive(Resource, Clone)]
+pub struct AnalysisAudioSender(pub Sender<f32>);
+pub struct AnalysisAudioReceiver(pub Receiver<f32>);
+
 impl Plugin for AudioPlugin {
     fn build(&self, app: &mut App) {
         let (mic_tx, mic_rx) = std::sync::mpsc::channel::<Vec<f32>>();
+        let (analysis_tx, analysis_rx) = std::sync::mpsc::channel::<f32>();
 
         app
-            .insert_resource(AnalysisTimer(Timer::new(Duration::from_secs_f32(1.0 / 20.0), TimerMode::Repeating)))
+            .insert_resource(AnalysisTimer(Timer::new(Duration::from_secs_f32(1.0 / 60.0), TimerMode::Repeating)))
             .insert_resource(MicAudioSender(mic_tx))
             .insert_non_send_resource(MicAudioReceiver(mic_rx))
+            .insert_resource(AnalysisAudioSender(analysis_tx))
+            .insert_non_send_resource(AnalysisAudioReceiver(analysis_rx))
             .init_resource::<AudioSamples>()
             .init_resource::<AudioAnalysis>()
             .init_resource::<SelectedMic>()
@@ -34,11 +69,12 @@ impl Plugin for AudioPlugin {
                 Update,
                 (
                     read_mic_data_system,
+                    read_analysis_data_system,
                     manage_audio_playback,
                     audio_analysis_system
                         .after(read_mic_data_system)
+                        .after(read_analysis_data_system)
                         .after(manage_audio_playback)
-                        // MODIFIED: Only run analysis if the visualizer is enabled
                         .run_if(|viz_enabled: Res<VisualizationEnabled>| viz_enabled.0),
                 )
                 .run_if(in_state(AppState::Visualization2D).or_else(in_state(AppState::Visualization3D)))
@@ -67,16 +103,17 @@ pub struct SelectedMic(pub Option<String>);
 pub struct MicAudioSender(pub Sender<Vec<f32>>);
 pub struct MicAudioReceiver(pub Receiver<Vec<f32>>);
 
+// MODIFIED: Silenced benign warning. The stream must be held to keep it alive.
+#[allow(dead_code)]
 pub struct MicStream(pub Option<cpal::Stream>);
 
 #[derive(Resource, Default)]
 pub struct MicAudioBuffer(pub VecDeque<f32>);
+
 #[derive(Resource, Default, Clone)]
-pub struct AudioSamples(pub Vec<f32>);
+pub struct AudioSamples(pub VecDeque<f32>);
 #[derive(Resource)]
 pub struct AudioInfo { pub sample_rate: u32 }
-#[derive(Resource)]
-pub struct PlaybackStartTime(pub std::time::Instant);
 #[derive(Resource, Default)]
 pub struct AudioAnalysis { pub bass: f32, pub mid: f32, pub treble: f32 }
 
@@ -87,6 +124,7 @@ fn manage_audio_playback(
     sink: NonSend<Sink>,
     mut mic_stream: NonSendMut<MicStream>,
     mic_sender: Res<MicAudioSender>,
+    analysis_sender: Res<AnalysisAudioSender>,
     selected_mic: Res<SelectedMic>,
     mut audio_samples: ResMut<AudioSamples>,
 ){
@@ -96,21 +134,25 @@ fn manage_audio_playback(
 
     sink.stop();
     *mic_stream = MicStream(None);
+    audio_samples.0.clear();
 
     match &selected_source.0 {
         AudioSource::File(path) => {
-            info!("Playing audio file: {:?}", path);
-            let file = BufReader::new(File::open(path).expect("Failed to open music file"));
-            let source = Decoder::new(file).unwrap();
-            let sample_rate = source.sample_rate();
-            commands.insert_resource(AudioInfo { sample_rate });
-            let samples: Vec<f32> = source.convert_samples::<f32>().collect();
-            audio_samples.0 = samples;
-            let new_source = rodio::buffer::SamplesBuffer::new(1, sample_rate, audio_samples.0.clone());
-            sink.clear();
-            sink.append(new_source);
+            info!("Streaming and analyzing file: {:?}", path);
+
+            let file_bytes = std::fs::read(path).expect("Failed to read music file");
+            let cursor = Cursor::new(file_bytes);
+            let source = Decoder::new(cursor).unwrap();
+
+            commands.insert_resource(AudioInfo { sample_rate: source.sample_rate() });
+
+            let tee_source = AudioDataTee {
+                source: source.convert_samples(),
+                sender: analysis_sender.0.clone(),
+            };
+
+            sink.append(tee_source);
             sink.play();
-            commands.insert_resource(PlaybackStartTime(std::time::Instant::now()));
         }
         AudioSource::Microphone => {
             info!("Starting microphone capture");
@@ -139,6 +181,11 @@ fn manage_audio_playback(
     }
 }
 
+pub fn read_analysis_data_system(receiver: Option<NonSend<AnalysisAudioReceiver>>, mut buffer: ResMut<AudioSamples>) {
+    if let Some(receiver) = receiver {
+        buffer.0.extend(receiver.0.try_iter());
+    }
+}
 
 pub fn read_mic_data_system(receiver: Option<NonSend<MicAudioReceiver>>, mut buffer: ResMut<MicAudioBuffer>) {
     if let Some(receiver) = receiver {
@@ -154,8 +201,7 @@ pub fn audio_analysis_system(
     mut audio_analysis: ResMut<AudioAnalysis>,
     audio_info: Option<Res<AudioInfo>>,
     audio_source: Res<SelectedAudioSource>,
-    audio_samples: Res<AudioSamples>,
-    start_time: Option<Res<PlaybackStartTime>>,
+    mut audio_samples: ResMut<AudioSamples>,
     mut mic_buffer: ResMut<MicAudioBuffer>,
 ) {
     analysis_timer.0.tick(time.delta());
@@ -166,31 +212,33 @@ pub fn audio_analysis_system(
     let Some(audio_info) = audio_info else { return };
     let fft_size = 4096;
 
-    let samples_slice: Cow<[f32]> = match &audio_source.0 {
+    let analysis_buffer: Option<Vec<f32>> = match &audio_source.0 {
         AudioSource::File(_) => {
-            if let Some(start_time) = start_time {
-                if audio_samples.0.is_empty() { return; }
-                let elapsed = start_time.0.elapsed().as_secs_f32();
-                let current_sample_index = (elapsed * audio_info.sample_rate as f32) as usize;
-                if current_sample_index + fft_size > audio_samples.0.len() { return; }
-                Cow::from(&audio_samples.0[current_sample_index..current_sample_index + fft_size])
+            if audio_samples.0.len() < fft_size {
+                None
             } else {
-                return;
+                let buffer_len = audio_samples.0.len();
+                let analysis_vec = audio_samples.0.iter().copied().take(fft_size).collect();
+                let drain_amount = buffer_len.saturating_sub(fft_size / 2);
+                audio_samples.0.drain(..drain_amount);
+                Some(analysis_vec)
             }
         },
         AudioSource::Microphone => {
             if mic_buffer.0.len() < fft_size {
-                return;
+                None
+            } else {
+                let buffer_len = mic_buffer.0.len();
+                let analysis_vec = mic_buffer.0.iter().copied().take(fft_size).collect();
+                let drain_amount = buffer_len.saturating_sub(fft_size / 2);
+                mic_buffer.0.drain(..drain_amount);
+                Some(analysis_vec)
             }
-            let analysis_vec: Vec<f32> = mic_buffer.0.iter().take(fft_size).copied().collect();
-            let drain_amount = mic_buffer.0.len().saturating_sub(fft_size / 2);
-            mic_buffer.0.drain(..drain_amount);
-            Cow::from(analysis_vec)
         }
-        AudioSource::None => return,
+        AudioSource::None => None,
     };
 
-    if samples_slice.is_empty() { return; }
+    let Some(samples_slice) = analysis_buffer else { return };
 
     let hann_window = hann_window(&samples_slice);
     let spectrum = samples_fft_to_spectrum(
