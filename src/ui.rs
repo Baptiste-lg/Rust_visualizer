@@ -4,7 +4,7 @@ use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts};
 use crate::audio::{AudioSource, SelectedAudioSource, SelectedMic};
 use crate::config::VisualsConfig;
-use crate::AppState;
+use crate::{AppState, VisualizationEnabled}; // MODIFIED: Import VisualizationEnabled
 use cpal::traits::{DeviceTrait, HostTrait};
 
 pub struct UiPlugin;
@@ -139,22 +139,29 @@ fn mic_selection_interaction(
     }
 }
 
+// MODIFIED: Added viz_enabled parameter and the toggle button
 fn visualizer_ui_system(
     mut contexts: EguiContexts,
     mut config: ResMut<VisualsConfig>,
     mut selected_source: ResMut<SelectedAudioSource>,
+    mut viz_enabled: ResMut<VisualizationEnabled>,
 ) {
     // Window for visual controls
     egui::Window::new("Controls").show(contexts.ctx_mut(), |ui| {
         ui.label("Bass Sensitivity");
         ui.add(egui::Slider::new(&mut config.bass_sensitivity, 0.0..=20.0));
+        ui.separator();
+
+        // NEW: Button to toggle the visualizer on and off.
+        let button_text = if viz_enabled.0 { "Deactivate Visualizer" } else { "Activate Visualizer" };
+        if ui.button(button_text).clicked() {
+            viz_enabled.0 = !viz_enabled.0;
+        }
     });
 
     // Window for audio source selection
     egui::Window::new("Audio Source").show(contexts.ctx_mut(), |ui| {
-        ui.label("Current Source:");
-        ui.label(format!("{:?}", selected_source.0)); // Display current source for clarity
-
+        ui.label(format!("Current Source: {:?}", selected_source.0));
         ui.separator();
 
         if ui.button("Use Microphone").clicked() {
