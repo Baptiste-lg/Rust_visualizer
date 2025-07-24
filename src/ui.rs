@@ -1,12 +1,14 @@
 // src/ui.rs
 
 use bevy::prelude::*;
-// MODIFIED: Import EguiSet to control system ordering
 use bevy_egui::{egui, EguiContexts, EguiSet};
 use crate::audio::{AudioSource, SelectedAudioSource, SelectedMic};
 use crate::config::VisualsConfig;
 use crate::{AppState, VisualizationEnabled};
 use cpal::traits::{DeviceTrait, HostTrait};
+// MODIFIED: Import the PrimaryWindow component to check for it.
+use bevy::window::PrimaryWindow;
+
 
 pub struct UiPlugin;
 
@@ -22,8 +24,9 @@ impl Plugin for UiPlugin {
             .add_systems(
                 Update,
                 visualizer_ui_system
-                    // MODIFIED: Ensure this runs after the Egui context is initialized.
                     .after(EguiSet::InitContexts)
+                    // MODIFIED: This is the correct way to check if the primary window exists.
+                    .run_if(|q: Query<Entity, With<PrimaryWindow>>| !q.is_empty())
                     .run_if(in_state(AppState::Visualization2D).or_else(in_state(AppState::Visualization3D)))
             );
     }
@@ -80,7 +83,6 @@ fn menu_button_interaction(
 }
 
 fn setup_mic_selection_menu(mut commands: Commands) {
-    info!("Opening microphone selection menu...");
     commands.spawn((Camera2dBundle::default(), MainMenuUI));
     let mut root = commands.spawn((NodeBundle {
         style: Style {
@@ -104,7 +106,6 @@ fn setup_mic_selection_menu(mut commands: Commands) {
         root.with_children(|parent| {
             for device in devices {
                 if let Ok(name) = device.name() {
-                    info!("Found device: {}", name);
                     parent.spawn((
                         ButtonBundle {
                             style: Style {
@@ -135,7 +136,6 @@ fn mic_selection_interaction(
 ) {
     for (interaction, button) in &mut button_query {
         if *interaction == Interaction::Pressed {
-            info!("Selected microphone: {}", &button.0);
             selected_mic.0 = Some(button.0.clone());
             next_app_state.set(AppState::MainMenu);
         }
@@ -200,7 +200,6 @@ fn create_menu_button(parent: &mut ChildBuilder, text: &str, action: MenuButtonA
 }
 
 fn cleanup_menu(mut commands: Commands, ui_query: Query<Entity, With<MainMenuUI>>) {
-    info!("Cleaning up menu UI...");
     for entity in ui_query.iter() {
         commands.entity(entity).despawn_recursive();
     }
