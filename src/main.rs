@@ -26,26 +26,32 @@ pub enum AppState {
     Visualization2D,
 }
 
-// NEW: A resource to control the visualizer's state.
 #[derive(Resource, Debug)]
 pub struct VisualizationEnabled(pub bool);
 
 impl Default for VisualizationEnabled {
     fn default() -> Self {
-        Self(true) // Enabled by default
+        Self(true)
     }
 }
 
 
 fn main() {
-    App::new()
+    let mut app = App::new();
+
+    // MODIFIED: Get the audio stream and handle once.
+    let (stream, stream_handle) = OutputStream::try_default().unwrap();
+
+    app
         .add_plugins(DefaultPlugins)
-        .insert_non_send_resource(OutputStream::try_default().unwrap())
-        .insert_non_send_resource(Sink::try_new(&OutputStream::try_default().unwrap().1).unwrap())
+        // MODIFIED: Keep the stream alive as a non-send resource.
+        .insert_non_send_resource(stream)
+        // MODIFIED: Create the sink from the handle.
+        .insert_non_send_resource(Sink::try_new(&stream_handle).unwrap())
         .insert_non_send_resource(MicStream(None))
         .init_resource::<VisualsConfig>()
         .init_resource::<SelectedAudioSource>()
-        .init_resource::<VisualizationEnabled>() // NEW: Initialize the resource
+        .init_resource::<VisualizationEnabled>()
         .init_state::<AppState>()
         .add_plugins((
             EguiPlugin,
