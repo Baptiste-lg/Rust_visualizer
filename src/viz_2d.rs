@@ -1,7 +1,7 @@
 // src/viz_2d.rs
 
 use bevy::prelude::*;
-use crate::{AppState, audio::AudioAnalysis}; // Import shared data from main.rs
+use crate::{AppState, audio::AudioAnalysis, VisualizationEnabled}; // MODIFIED: Import VisualizationEnabled
 
 pub struct Viz2DPlugin;
 
@@ -9,19 +9,19 @@ impl Plugin for Viz2DPlugin {
     fn build(&self, app: &mut App) {
         app
             .add_systems(OnEnter(AppState::Visualization2D), setup_2d_visuals)
-            .add_systems(Update, update_2d_visuals.run_if(in_state(AppState::Visualization2D)));
+            // MODIFIED: Added run_if condition
+            .add_systems(Update, update_2d_visuals
+                .run_if(in_state(AppState::Visualization2D))
+                .run_if(|viz_enabled: Res<VisualizationEnabled>| viz_enabled.0)
+            );
     }
 }
 
-// A marker component for our squares, to make them easy to query
 #[derive(Component)]
 struct VizSquare;
 
-// This system runs once when we enter the 2D visualization state
 fn setup_2d_visuals(mut commands: Commands) {
     info!("Setting up 2D visuals...");
-
-    // Spawn a 2D camera
     commands.spawn(Camera2dBundle::default());
 
     let square_size = 50.0;
@@ -44,25 +44,22 @@ fn setup_2d_visuals(mut commands: Commands) {
                     )),
                     ..default()
                 },
-                VizSquare, // Tag our squares
+                VizSquare,
             ));
         }
     }
 }
 
-// This system runs every frame in the 2D visualization state
 fn update_2d_visuals(
     audio_analysis: Res<AudioAnalysis>,
     mut query: Query<(&mut Sprite, &mut Transform), With<VizSquare>>,
 ) {
-    // Make the color pulsate with the bass
     let bass_color = Color::rgb(
         0.2 + audio_analysis.bass * 0.8,
         0.2,
         0.8 - audio_analysis.bass * 0.4
     );
 
-    // Make the scale pulse with the treble
     let treble_scale = 1.0 + audio_analysis.treble * 0.5;
 
     for (mut sprite, mut transform) in &mut query {

@@ -1,7 +1,7 @@
 // src/viz_3d.rs
 
 use bevy::prelude::*;
-use crate::{AppState, audio::AudioAnalysis, config::VisualsConfig}; // Import new config
+use crate::{AppState, audio::AudioAnalysis, config::VisualsConfig, VisualizationEnabled}; // MODIFIED: Import VisualizationEnabled
 use crate::audio::audio_analysis_system;
 
 pub struct Viz3DPlugin;
@@ -10,9 +10,11 @@ impl Plugin for Viz3DPlugin {
     fn build(&self, app: &mut App) {
         app
             .add_systems(OnEnter(AppState::Visualization3D), setup_3d_visuals)
+            // MODIFIED: Added run_if condition
             .add_systems(Update, update_3d_visuals
                 .after(audio_analysis_system)
                 .run_if(in_state(AppState::Visualization3D))
+                .run_if(|viz_enabled: Res<VisualizationEnabled>| viz_enabled.0)
             );
     }
 }
@@ -56,15 +58,12 @@ fn setup_3d_visuals(
     }
 }
 
-// UPDATED: Now takes VisualsConfig as a parameter
 fn update_3d_visuals(
     audio_analysis: Res<AudioAnalysis>,
-    config: Res<VisualsConfig>, // <-- Read the config resource
+    config: Res<VisualsConfig>,
     mut query: Query<&mut Transform, With<VisualizerCube>>,
 ) {
-    // Use the sensitivity from the config resource
     let bass_height = 1.0 + audio_analysis.bass * config.bass_sensitivity;
-
     let smoothing_factor = 0.1;
 
     for mut transform in &mut query {
