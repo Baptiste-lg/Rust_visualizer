@@ -6,6 +6,7 @@ mod ui;
 mod viz_2d;
 mod viz_3d;
 mod config;
+mod camera; // ADDED
 
 // --- Plugin Imports ---
 use crate::config::VisualsConfig;
@@ -16,6 +17,7 @@ use rodio::{OutputStream, Sink};
 use ui::UiPlugin;
 use viz_2d::Viz2DPlugin;
 use viz_3d::Viz3DPlugin;
+use camera::CameraPlugin; // ADDED
 
 #[derive(States, Debug, Clone, PartialEq, Eq, Hash, Default)]
 pub enum AppState {
@@ -39,14 +41,11 @@ impl Default for VisualizationEnabled {
 fn main() {
     let mut app = App::new();
 
-    // MODIFIED: Get the audio stream and handle once.
     let (stream, stream_handle) = OutputStream::try_default().unwrap();
 
     app
         .add_plugins(DefaultPlugins)
-        // MODIFIED: Keep the stream alive as a non-send resource.
         .insert_non_send_resource(stream)
-        // MODIFIED: Create the sink from the handle.
         .insert_non_send_resource(Sink::try_new(&stream_handle).unwrap())
         .insert_non_send_resource(MicStream(None))
         .init_resource::<VisualsConfig>()
@@ -59,33 +58,7 @@ fn main() {
             UiPlugin,
             Viz2DPlugin,
             Viz3DPlugin,
-            ScenePlugin,
+            CameraPlugin, // MODIFIED: Replaced ScenePlugin with CameraPlugin
         ))
         .run();
-}
-
-pub struct ScenePlugin;
-impl Plugin for ScenePlugin {
-    fn build(&self, app: &mut App) {
-        app.add_systems(
-            OnEnter(AppState::Visualization3D),
-            setup_3d_scene
-        );
-    }
-}
-
-fn setup_3d_scene(mut commands: Commands) {
-    commands.spawn(Camera3dBundle {
-        transform: Transform::from_xyz(-12.0, 10.0, 12.0).looking_at(Vec3::ZERO, Vec3::Y),
-        ..default()
-    });
-    commands.spawn(PointLightBundle {
-        point_light: PointLight {
-            intensity: 2000.0,
-            shadows_enabled: true,
-            ..default()
-        },
-        transform: Transform::from_xyz(4.0, 8.0, 4.0),
-        ..default()
-    });
 }
