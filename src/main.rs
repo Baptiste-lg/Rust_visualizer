@@ -26,14 +26,26 @@ pub enum AppState {
     Visualization2D,
 }
 
+// NEW: A resource to control the visualizer's state.
+#[derive(Resource, Debug)]
+pub struct VisualizationEnabled(pub bool);
+
+impl Default for VisualizationEnabled {
+    fn default() -> Self {
+        Self(true) // Enabled by default
+    }
+}
+
+
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
         .insert_non_send_resource(OutputStream::try_default().unwrap())
         .insert_non_send_resource(Sink::try_new(&OutputStream::try_default().unwrap().1).unwrap())
-        .insert_non_send_resource(MicStream(None)) // Resource to hold the microphone stream
+        .insert_non_send_resource(MicStream(None))
         .init_resource::<VisualsConfig>()
-        .init_resource::<SelectedAudioSource>() // Will default to AudioSource::None
+        .init_resource::<SelectedAudioSource>()
+        .init_resource::<VisualizationEnabled>() // NEW: Initialize the resource
         .init_state::<AppState>()
         .add_plugins((
             EguiPlugin,
@@ -57,7 +69,6 @@ impl Plugin for ScenePlugin {
 }
 
 fn setup_3d_scene(mut commands: Commands) {
-    info!("Setting up 3D scene...");
     commands.spawn(Camera3dBundle {
         transform: Transform::from_xyz(-12.0, 10.0, 12.0).looking_at(Vec3::ZERO, Vec3::Y),
         ..default()
