@@ -1,10 +1,14 @@
 // src/camera.rs
 
 use bevy::{
+    core_pipeline::bloom::BloomSettings,
     input::mouse::{MouseMotion, MouseWheel},
-    prelude::*, window::PrimaryWindow
+    prelude::*,
+    window::PrimaryWindow
 };
-use crate::AppState;
+// ADDED: Imports to check for UI interaction
+use bevy_egui::{egui, EguiContexts};
+use crate::{AppState, config::VisualsConfig};
 
 pub struct CameraPlugin;
 
@@ -12,7 +16,10 @@ impl Plugin for CameraPlugin {
     fn build(&self, app: &mut App) {
         app
             .add_systems(OnEnter(AppState::Visualization3D), setup_3d_scene_and_camera)
-            .add_systems(Update, pan_orbit_camera.run_if(in_state(AppState::Visualization3D)));
+            .add_systems(Update, (
+                pan_orbit_camera,
+                update_bloom_settings
+            ).run_if(in_state(AppState::Visualization3D)));
     }
 }
 
@@ -20,7 +27,7 @@ impl Plugin for CameraPlugin {
 pub struct PanOrbitCamera {
     pub focus: Vec3,
     pub radius: f32,
-    pub upside_down: bool,
+    // REMOVED: The unused 'upside_down' field to fix the warning.
 }
 
 impl Default for PanOrbitCamera {
@@ -28,7 +35,6 @@ impl Default for PanOrbitCamera {
         PanOrbitCamera {
             focus: Vec3::ZERO,
             radius: 15.0,
-            upside_down: false,
         }
     }
 }
@@ -43,6 +49,7 @@ fn setup_3d_scene_and_camera(mut commands: Commands) {
             ..default()
         },
         PanOrbitCamera::default(),
+        BloomSettings::default(),
     ));
 
     commands.spawn(PointLightBundle {
@@ -56,6 +63,17 @@ fn setup_3d_scene_and_camera(mut commands: Commands) {
     });
 }
 
+fn update_bloom_settings(
+    config: Res<VisualsConfig>,
+    mut camera_query: Query<&mut BloomSettings, With<Camera>>,
+) {
+    if config.is_changed() {
+        for mut bloom in camera_query.iter_mut() {
+            bloom.intensity = config.bloom_intensity;
+            bloom.prefilter_settings.threshold = config.bloom_threshold;
+        }
+    }
+}
 
 fn pan_orbit_camera(
     primary_window: Query<&Window, With<PrimaryWindow>>,
@@ -63,7 +81,17 @@ fn pan_orbit_camera(
     mut ev_scroll: EventReader<MouseWheel>,
     input_mouse: Res<ButtonInput<MouseButton>>,
     mut query: Query<(&mut PanOrbitCamera, &mut Transform)>,
+    // ADDED: The EguiContexts resource to check for UI interaction
+    mut contexts: EguiContexts,
 ) {
+    // ADDED: This guard clause prevents camera movement when the mouse is over a UI element.
+    let ctx = contexts.ctx_mut();
+    if ctx.is_pointer_over_area() || ctx.wants_pointer_input() {
+        ev_motion.clear(); // Consume the event to prevent it from being used by other systems
+        ev_scroll.clear(); // Consume the event
+        return;
+    }
+
     let Ok(window) = primary_window.get_single() else { return };
 
     for (mut pan_orbit, mut transform) in query.iter_mut() {
@@ -81,8 +109,8 @@ fn pan_orbit_camera(
 
                 let yaw = Quat::from_rotation_y(-delta_x);
                 let pitch = Quat::from_rotation_x(-delta_y);
-                transform.rotation = yaw * transform.rotation; // Apply yaw first
-                transform.rotation *= pitch; // Then apply pitch
+                transform.rotation = yaw * transform.rotation;
+                transform.rotation *= pitch;
             }
         }
 
