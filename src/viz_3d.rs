@@ -18,9 +18,14 @@ impl Plugin for Viz3DPlugin {
     }
 }
 
+// MODIFIED: This component now stores the cube's original position and its associated frequency band.
 #[derive(Component)]
-struct VisualizerCube;
+struct VisualizerCube {
+    initial_position: Vec3,
+    frequency_band: usize,
+}
 
+// MODIFIED: We now assign a frequency band to each cube when creating the scene.
 fn setup_3d_visuals(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -29,18 +34,17 @@ fn setup_3d_visuals(
     info!("Setting up 3D visuals...");
 
     let cube_mesh = meshes.add(Cuboid::new(1.0, 1.0, 1.0));
-
     let cube_spacing = 2.0;
-    let grid_size = 8;
+    let grid_size = 8; // Should match NUM_BANDS in audio.rs
 
     for x in 0..grid_size {
         for z in 0..grid_size {
             let x_pos = (x as f32 - grid_size as f32 / 2.0) * cube_spacing;
             let z_pos = (z as f32 - grid_size as f32 / 2.0) * cube_spacing;
+            let initial_pos = Vec3::new(x_pos, 0.0, z_pos);
 
             let material = materials.add(StandardMaterial {
                 base_color: Color::rgb(0.8, 0.7, 0.6),
-                // MODIFIED: Set the initial emissive color to black.
                 emissive: Color::BLACK,
                 metallic: 1.0,
                 perceptual_roughness: 0.1,
@@ -51,45 +55,53 @@ fn setup_3d_visuals(
                 PbrBundle {
                     mesh: cube_mesh.clone(),
                     material: material,
-                    transform: Transform::from_xyz(x_pos, 0.0, z_pos),
+                    transform: Transform::from_translation(initial_pos),
                     ..default()
                 },
-                VisualizerCube,
+                // Each cube in a row along the x-axis is linked to the same frequency band.
+                VisualizerCube {
+                    initial_position: initial_pos,
+                    frequency_band: x,
+                },
             ));
         }
     }
 }
 
-// MODIFIED: This function now calculates a much stronger emissive color to make the bloom pop.
+// MODIFIED: The entire animation logic is new, using multiple frequency bands.
 fn update_3d_visuals(
     audio_analysis: Res<AudioAnalysis>,
     config: Res<VisualsConfig>,
-    mut query: Query<(&mut Transform, &Handle<StandardMaterial>), With<VisualizerCube>>,
+    mut query: Query<(&mut Transform, &Handle<StandardMaterial>, &VisualizerCube)>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
-    let bass_height = 1.0 + audio_analysis.bass * config.bass_sensitivity;
-    let smoothing_factor = 0.1;
+    if audio_analysis.frequency_bins.is_empty() {
+        return;
+    }
 
-    // We calculate the emissive color only if bloom is enabled.
-    let emissive_color = if config.bloom_enabled {
-        // Using a bright orange color as a base.
-        let base_color = Color::rgb(2.0, 0.5, 0.0);
-        // We multiply the color by the bass intensity to make it glow.
-        // The value can go above 1.0, which is necessary for HDR.
-        base_color * audio_analysis.bass * 10.0
-    } else {
-        // If bloom is disabled, the cubes emit no light.
-        Color::BLACK
-    };
+    // The treble will control how far the cubes spread out.
+    let spread_factor = 1.0 + (audio_analysis.treble_average * 0.1).min(1.5);
+    let smoothing_factor = 0.2;
 
-    for (mut transform, material_handle) in &mut query {
-        let current_scale = transform.scale.y;
-        let target_scale = bass_height;
+    for (mut transform, material_handle, cube) in &mut query {
+        // 1. Cube Height: Determined by the amplitude of its assigned frequency band.
+        let band_amplitude = audio_analysis.frequency_bins[cube.frequency_band];
+        let target_scale = 1.0 + band_amplitude * 4.0;
+        transform.scale.y = transform.scale.y + (target_scale - transform.scale.y) * smoothing_factor;
 
-        transform.scale.y = current_scale + (target_scale - current_scale) * smoothing_factor;
+        // 2. Cube Spacing: Cubes are pushed away from the center based on the treble.
+        transform.translation.x = cube.initial_position.x * spread_factor;
+        transform.translation.z = cube.initial_position.z * spread_factor;
+
+        // 3. Cube Glow: Controlled by the cube's height and the bloom color from the config.
+        let emissive_color = if config.bloom_enabled {
+            let glow_intensity = (transform.scale.y - 1.0).max(0.0);
+            config.bloom_color * glow_intensity * 2.0
+        } else {
+            Color::BLACK
+        };
 
         if let Some(material) = materials.get_mut(material_handle) {
-            // We apply the new emissive color to the material of each cube.
             material.emissive = emissive_color;
         }
     }

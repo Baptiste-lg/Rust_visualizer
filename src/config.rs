@@ -8,6 +8,7 @@ pub struct VisualsConfig {
     pub bloom_enabled: bool,
     pub bloom_intensity: f32,
     pub bloom_threshold: f32,
+    pub bloom_color: Color,
 }
 
 impl Default for VisualsConfig {
@@ -15,9 +16,9 @@ impl Default for VisualsConfig {
         Self {
             bass_sensitivity: 4.0,
             bloom_enabled: true,
-            // MODIFIED: Increased default intensity for a more visible bloom effect.
             bloom_intensity: 0.3,
             bloom_threshold: 0.8,
+            bloom_color: Color::rgb(1.0, 0.2, 0.0),
         }
     }
 }

@@ -4,7 +4,6 @@ use bevy::prelude::*;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use rodio::{Decoder, Sink, source::Source};
 use spectrum_analyzer::{samples_fft_to_spectrum, scaling::divide_by_N_sqrt, windows::hann_window, FrequencyLimit};
-// MODIFIED: Removed unused `Cow` import
 use std::io::Cursor;
 use std::sync::mpsc::{Receiver, Sender};
 use crate::{AppState, VisualizationEnabled};
@@ -103,7 +102,6 @@ pub struct SelectedMic(pub Option<String>);
 pub struct MicAudioSender(pub Sender<Vec<f32>>);
 pub struct MicAudioReceiver(pub Receiver<Vec<f32>>);
 
-// MODIFIED: Silenced benign warning. The stream must be held to keep it alive.
 #[allow(dead_code)]
 pub struct MicStream(pub Option<cpal::Stream>);
 
@@ -114,10 +112,14 @@ pub struct MicAudioBuffer(pub VecDeque<f32>);
 pub struct AudioSamples(pub VecDeque<f32>);
 #[derive(Resource)]
 pub struct AudioInfo { pub sample_rate: u32 }
+
 #[derive(Resource, Default)]
-pub struct AudioAnalysis { pub bass: f32, pub mid: f32, pub treble: f32 }
+pub struct AudioAnalysis {
+    pub frequency_bins: Vec<f32>,
+    pub treble_average: f32,
+}
 
-
+// THIS IS THE FUNCTION THAT WAS MISSING
 fn manage_audio_playback(
     mut commands: Commands,
     selected_source: Res<SelectedAudioSource>,
@@ -181,12 +183,14 @@ fn manage_audio_playback(
     }
 }
 
+// THIS IS THE FUNCTION THAT WAS MISSING
 pub fn read_analysis_data_system(receiver: Option<NonSend<AnalysisAudioReceiver>>, mut buffer: ResMut<AudioSamples>) {
     if let Some(receiver) = receiver {
         buffer.0.extend(receiver.0.try_iter());
     }
 }
 
+// THIS IS THE FUNCTION THAT WAS MISSING
 pub fn read_mic_data_system(receiver: Option<NonSend<MicAudioReceiver>>, mut buffer: ResMut<MicAudioBuffer>) {
     if let Some(receiver) = receiver {
         for new_data in receiver.0.try_iter() {
@@ -248,16 +252,30 @@ pub fn audio_analysis_system(
         Some(&divide_by_N_sqrt),
     ).expect("Failed to compute spectrum");
 
-    let bass_limit = 250.0;
-    let mid_limit = 4000.0;
-    let (mut bass_val, mut mid_val, mut treble_val) = (0.0, 0.0, 0.0);
+    const NUM_BANDS: usize = 8;
+    let mut new_bins = vec![0.0; NUM_BANDS];
+    let band_limits = [50.0, 150.0, 300.0, 500.0, 1000.0, 2000.0, 5000.0, 15000.0];
+    let mut current_band = 0;
+    let mut treble_val = 0.0;
+
     for (freq, val) in spectrum.data() {
-        if *freq < bass_limit.into() { bass_val += val.val(); }
-        else if *freq < mid_limit.into() { mid_val += val.val(); }
-        else { treble_val += val.val(); }
+        if current_band < NUM_BANDS -1 && freq.val() > band_limits[current_band] {
+            current_band += 1;
+        }
+        new_bins[current_band] += val.val();
+
+        if freq.val() > 4000.0 {
+            treble_val += val.val();
+        }
     }
+
     let smoothing = 0.5;
-    audio_analysis.bass = audio_analysis.bass * smoothing + (bass_val * 1.5) * (1.0 - smoothing);
-    audio_analysis.mid = audio_analysis.mid * smoothing + (mid_val * 1.5) * (1.0 - smoothing);
-    audio_analysis.treble = audio_analysis.treble * smoothing + (treble_val * 1.5) * (1.0 - smoothing);
+    if audio_analysis.frequency_bins.len() != NUM_BANDS {
+        audio_analysis.frequency_bins = new_bins;
+    } else {
+        for i in 0..NUM_BANDS {
+            audio_analysis.frequency_bins[i] = audio_analysis.frequency_bins[i] * smoothing + new_bins[i] * (1.0 - smoothing);
+        }
+    }
+    audio_analysis.treble_average = audio_analysis.treble_average * smoothing + treble_val * (1.0 - smoothing);
 }

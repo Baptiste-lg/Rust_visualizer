@@ -2,6 +2,8 @@
 
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts, EguiSet};
+// MODIFIED: Imported egui's color_edit for the color picker.
+use bevy_egui::egui::color_picker;
 use crate::audio::{AudioSource, SelectedAudioSource, SelectedMic};
 use crate::config::VisualsConfig;
 use crate::{AppState, VisualizationEnabled};
@@ -140,6 +142,7 @@ fn mic_selection_interaction(
     }
 }
 
+// MODIFIED: Sliders and color picker are now inside a conditional block.
 fn visualizer_ui_system(
     mut contexts: EguiContexts,
     mut config: ResMut<VisualsConfig>,
@@ -154,12 +157,22 @@ fn visualizer_ui_system(
 
         ui.checkbox(&mut config.bloom_enabled, "Enable Bloom");
 
+        // Only show bloom controls if the effect is enabled.
         if config.bloom_enabled {
             ui.label("Intensity");
-            // MODIFIED: Increased the slider range for more control over the bloom effect.
             ui.add(egui::Slider::new(&mut config.bloom_intensity, 0.0..=1.0));
+
             ui.label("Threshold");
             ui.add(egui::Slider::new(&mut config.bloom_threshold, 0.0..=2.0));
+
+            ui.separator();
+
+            ui.label("Bloom Color");
+            // Add the color picker button.
+            let mut color_temp = [config.bloom_color.r(), config.bloom_color.g(), config.bloom_color.b()];
+            if color_picker::color_edit_button_rgb(ui, &mut color_temp).changed() {
+                config.bloom_color = Color::rgb(color_temp[0], color_temp[1], color_temp[2]);
+            }
         }
 
         ui.separator();
