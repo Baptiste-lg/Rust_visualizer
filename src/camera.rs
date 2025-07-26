@@ -1,17 +1,15 @@
 // src/camera.rs
 
 use bevy::{
-    // MODIFIED: Corrected the import path for post-processing components
     core_pipeline::{
         bloom::BloomSettings,
-        tonemapping::Tonemapping,
-        experimental::taa::TemporalAntiAliasBundle // Correct path for DebandDither/TAA
+        // REMOVED: Unused import for Tonemapping, fixing the warning.
+        experimental::taa::TemporalAntiAliasBundle
     },
     input::mouse::{MouseMotion, MouseWheel},
     prelude::*,
     window::PrimaryWindow
 };
-// MODIFIED: Removed the unused 'egui' import and added EguiContexts
 use bevy_egui::EguiContexts;
 use crate::{AppState, config::VisualsConfig};
 
@@ -43,7 +41,6 @@ impl Default for PanOrbitCamera {
     }
 }
 
-// MODIFIED: The camera setup now includes the correct components for post-processing.
 fn setup_3d_scene_and_camera(mut commands: Commands) {
     let initial_transform = Transform::from_xyz(0.0, 0.0, 15.0)
         .looking_at(Vec3::ZERO, Vec3::Y);
@@ -54,10 +51,7 @@ fn setup_3d_scene_and_camera(mut commands: Commands) {
             ..default()
         },
         PanOrbitCamera::default(),
-        // --- Post-processing stack ---
         BloomSettings::default(),
-        Tonemapping::TonyMcMapface,
-        // Bevy 0.13 bundles DebandDither with Temporal Anti-Aliasing (TAA)
         TemporalAntiAliasBundle::default(),
     ));
 
@@ -76,14 +70,15 @@ fn update_bloom_settings(
     config: Res<VisualsConfig>,
     mut camera_query: Query<&mut BloomSettings, With<Camera>>,
 ) {
-    if config.is_changed() {
-        for mut bloom in camera_query.iter_mut() {
-            if config.bloom_enabled {
-                bloom.intensity = config.bloom_intensity;
-                bloom.prefilter_settings.threshold = config.bloom_threshold;
-            } else {
-                bloom.intensity = 0.0;
-            }
+    // MODIFIED: Removed the `if config.is_changed()` guard.
+    // This system now runs every frame to ensure our UI settings are always applied,
+    // overriding any defaults from the render pipeline.
+    for mut bloom in camera_query.iter_mut() {
+        if config.bloom_enabled {
+            bloom.intensity = config.bloom_intensity;
+            bloom.prefilter_settings.threshold = config.bloom_threshold;
+        } else {
+            bloom.intensity = 0.0;
         }
     }
 }
