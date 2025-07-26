@@ -7,7 +7,7 @@ use bevy::{
     },
     input::mouse::{MouseMotion, MouseWheel},
     prelude::*,
-    render::camera::OrthographicProjection, // ADDED: Needed for 2D camera zoom
+    render::camera::OrthographicProjection,
     window::PrimaryWindow
 };
 use bevy_egui::EguiContexts;
@@ -19,12 +19,15 @@ impl Plugin for CameraPlugin {
     fn build(&self, app: &mut App) {
         app
             .add_systems(OnEnter(AppState::Visualization3D), setup_3d_scene_and_camera)
+            .add_systems(OnEnter(AppState::VisualizationOrb), setup_3d_scene_and_camera)
             .add_systems(Update, (
                 pan_orbit_camera,
                 update_bloom_settings
-            ).run_if(in_state(AppState::Visualization3D)))
-            // ADDED: A new system for 2D camera controls.
-            .add_systems(Update, control_2d_camera.run_if(in_state(AppState::Visualization2D)));
+            ).run_if(in_state(AppState::Visualization3D).or_else(in_state(AppState::VisualizationOrb))))
+            .add_systems(Update, control_2d_camera.run_if(in_state(AppState::Visualization2D)))
+            // ADDED: Systems to despawn the 3D camera when leaving a 3D state
+            .add_systems(OnExit(AppState::Visualization3D), despawn_3d_camera)
+            .add_systems(OnExit(AppState::VisualizationOrb), despawn_3d_camera);
     }
 }
 
@@ -43,6 +46,10 @@ impl Default for PanOrbitCamera {
     }
 }
 
+// ADDED: This component will tag the 3D camera so we can easily find and despawn it.
+#[derive(Component)]
+struct Camera3D;
+
 fn setup_3d_scene_and_camera(mut commands: Commands) {
     let initial_transform = Transform::from_xyz(0.0, 0.0, 15.0)
         .looking_at(Vec3::ZERO, Vec3::Y);
@@ -59,6 +66,7 @@ fn setup_3d_scene_and_camera(mut commands: Commands) {
         BloomSettings::default(),
         PanOrbitCamera::default(),
         TemporalAntiAliasBundle::default(),
+        Camera3D, // ADDED: Tag the camera
     ));
 
     commands.spawn(PointLightBundle {
@@ -72,35 +80,48 @@ fn setup_3d_scene_and_camera(mut commands: Commands) {
     });
 }
 
+// ADDED: This system despawns the 3D camera and light.
+fn despawn_3d_camera(
+    mut commands: Commands,
+    camera_query: Query<Entity, With<Camera3D>>,
+    light_query: Query<Entity, With<PointLight>>,
+) {
+    for entity in &camera_query {
+        commands.entity(entity).despawn_recursive();
+    }
+    for entity in &light_query {
+        commands.entity(entity).despawn_recursive();
+    }
+}
+
 fn update_bloom_settings(
     config: Res<VisualsConfig>,
-    mut camera_query: Query<(Entity, Option<&mut BloomSettings>), With<Camera>>,
+    mut camera_query: Query<(Entity, Option<&mut BloomSettings>), With<Camera3D>>,
     mut commands: Commands,
 ) {
-    let (camera_entity, bloom_settings) = camera_query.single_mut();
-
-    if config.bloom_enabled {
-        match bloom_settings {
-            Some(mut settings) => {
-                settings.intensity = config.bloom_intensity;
-                settings.low_frequency_boost = 0.7;
-                settings.low_frequency_boost_curvature = 0.95;
-                settings.high_pass_frequency = 0.85;
-                settings.prefilter_settings.threshold = config.bloom_threshold;
-                settings.prefilter_settings.threshold_softness = 0.6;
+    if let Ok((camera_entity, bloom_settings)) = camera_query.get_single_mut() {
+        if config.bloom_enabled {
+            match bloom_settings {
+                Some(mut settings) => {
+                    settings.intensity = config.bloom_intensity;
+                    settings.low_frequency_boost = 0.7;
+                    settings.low_frequency_boost_curvature = 0.95;
+                    settings.high_pass_frequency = 0.85;
+                    settings.prefilter_settings.threshold = config.bloom_threshold;
+                    settings.prefilter_settings.threshold_softness = 0.6;
+                }
+                None => {
+                    commands.entity(camera_entity).insert(BloomSettings::default());
+                }
             }
-            None => {
-                commands.entity(camera_entity).insert(BloomSettings::default());
+        } else {
+            if bloom_settings.is_some() {
+                commands.entity(camera_entity).remove::<BloomSettings>();
             }
-        }
-    } else {
-        if bloom_settings.is_some() {
-            commands.entity(camera_entity).remove::<BloomSettings>();
         }
     }
 }
 
-// ADDED: This new system handles zoom and rotation for the 2D camera.
 fn control_2d_camera(
     time: Res<Time>,
     keyboard_input: Res<ButtonInput<KeyCode>>,
@@ -114,7 +135,6 @@ fn control_2d_camera(
     }
 
     if let Ok((mut transform, mut projection)) = camera_query.get_single_mut() {
-        // --- Rotation ---
         let mut rotation_factor = 0.0;
         if keyboard_input.pressed(KeyCode::KeyE) {
             rotation_factor += 1.0;
@@ -122,14 +142,11 @@ fn control_2d_camera(
         if keyboard_input.pressed(KeyCode::KeyA) {
             rotation_factor -= 1.0;
         }
-        // Apply rotation
         transform.rotate_z(rotation_factor * time.delta_seconds());
 
-        // --- Zoom ---
         for ev in scroll_evr.read() {
             projection.scale -= ev.y * 0.1;
         }
-        // Ensure scale doesn't become negative
         projection.scale = projection.scale.max(0.1);
     }
 }
@@ -139,7 +156,7 @@ fn pan_orbit_camera(
     mut ev_motion: EventReader<MouseMotion>,
     mut ev_scroll: EventReader<MouseWheel>,
     input_mouse: Res<ButtonInput<MouseButton>>,
-    mut query: Query<(&mut PanOrbitCamera, &mut Transform)>,
+    mut query: Query<(&mut PanOrbitCamera, &mut Transform), With<Camera3D>>,
     mut contexts: EguiContexts,
 ) {
     let ctx = contexts.ctx_mut();
@@ -151,7 +168,7 @@ fn pan_orbit_camera(
 
     let Ok(window) = primary_window.get_single() else { return };
 
-    for (mut pan_orbit, mut transform) in query.iter_mut() {
+    if let Ok((mut pan_orbit, mut transform)) = query.get_single_mut() {
         if input_mouse.pressed(MouseButton::Left) {
             let mut rotation = Vec2::ZERO;
             for ev in ev_motion.read() {

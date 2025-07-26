@@ -5,7 +5,8 @@ use bevy_egui::{egui, EguiContexts, EguiSet};
 use bevy_egui::egui::color_picker;
 use crate::audio::{AudioSource, SelectedAudioSource, SelectedMic};
 use crate::config::VisualsConfig;
-use crate::{AppState, VisualizationEnabled};
+// MODIFIED: Added ActiveVisualization to the imports
+use crate::{AppState, VisualizationEnabled, ActiveVisualization};
 use cpal::traits::{DeviceTrait, HostTrait};
 use bevy::window::PrimaryWindow;
 
@@ -26,15 +27,17 @@ impl Plugin for UiPlugin {
                 visualizer_ui_system
                     .after(EguiSet::InitContexts)
                     .run_if(|q: Query<Entity, With<PrimaryWindow>>| !q.is_empty())
-                    .run_if(in_state(AppState::Visualization2D).or_else(in_state(AppState::Visualization3D)))
+                    .run_if(in_state(AppState::Visualization2D)
+                        .or_else(in_state(AppState::Visualization3D))
+                        .or_else(in_state(AppState::VisualizationOrb)))
             );
     }
 }
 
+// MODIFIED: Simplified menu actions
 #[derive(Component)]
 enum MenuButtonAction {
-    Start3D,
-    Start2D,
+    Start,
     ToMicSelection,
 }
 #[derive(Component)]
@@ -54,8 +57,8 @@ fn setup_main_menu(mut commands: Commands) {
             },
             ..default()
         }, MainMenuUI)).with_children(|parent| {
-        create_menu_button(parent, "Start 3D", MenuButtonAction::Start3D);
-        create_menu_button(parent, "Start 2D", MenuButtonAction::Start2D);
+        // MODIFIED: Changed to a single "Start" button
+        create_menu_button(parent, "Start Visualization", MenuButtonAction::Start);
         create_menu_button(parent, "Select Microphone", MenuButtonAction::ToMicSelection);
     });
 }
@@ -63,15 +66,15 @@ fn setup_main_menu(mut commands: Commands) {
 fn menu_button_interaction(
     mut button_query: Query<(&Interaction, &MenuButtonAction), (Changed<Interaction>, With<Button>)>,
     mut next_app_state: ResMut<NextState<AppState>>,
+    // ADDED: Get the active visualization resource
+    active_viz: Res<ActiveVisualization>,
 ) {
     for (interaction, action) in &mut button_query {
         if *interaction == Interaction::Pressed {
             match action {
-                MenuButtonAction::Start3D => {
-                    next_app_state.set(AppState::Visualization3D);
-                }
-                MenuButtonAction::Start2D => {
-                    next_app_state.set(AppState::Visualization2D);
+                MenuButtonAction::Start => {
+                    // MODIFIED: Go to the last active visualization state
+                    next_app_state.set(active_viz.0.clone());
                 }
                 MenuButtonAction::ToMicSelection => {
                     next_app_state.set(AppState::MicSelection);
@@ -147,6 +150,10 @@ fn visualizer_ui_system(
     mut selected_source: ResMut<SelectedAudioSource>,
     mut viz_enabled: ResMut<VisualizationEnabled>,
     app_state: Res<State<AppState>>,
+    // ADDED: Get the NextState to allow changing visualizers
+    mut next_app_state: ResMut<NextState<AppState>>,
+    // ADDED: Get the active visualization to update it
+    mut active_viz: ResMut<ActiveVisualization>,
 ) {
     egui::Window::new("Controls").show(contexts.ctx_mut(), |ui| {
         ui.label("Number of Bands");
@@ -155,7 +162,6 @@ fn visualizer_ui_system(
         ui.label("Amplitude Sensitivity");
         ui.add(egui::Slider::new(&mut config.bass_sensitivity, 0.0..=20.0));
 
-        // --- 2D-Specific Controls ---
         if *app_state.get() == AppState::Visualization2D {
             ui.separator();
             ui.label("Inactive Color");
@@ -171,7 +177,6 @@ fn visualizer_ui_system(
             }
         }
 
-        // --- 3D-Specific Controls ---
         if *app_state.get() == AppState::Visualization3D {
             ui.separator();
             ui.checkbox(&mut config.spread_enabled, "Enable Cube Spread");
@@ -199,6 +204,11 @@ fn visualizer_ui_system(
             }
         }
 
+        if *app_state.get() == AppState::VisualizationOrb {
+            ui.separator();
+            ui.label("Orb controls would go here.");
+        }
+
         ui.separator();
         let button_text = if viz_enabled.0 { "Deactivate Visualizer" } else { "Activate Visualizer" };
         if ui.button(button_text).clicked() {
@@ -214,7 +224,7 @@ fn visualizer_ui_system(
             selected_source.0 = AudioSource::Microphone;
         }
 
-        if ui.button("Choose Audio File").clicked() {
+        if ui.button("Choose AudioFile").clicked() {
             if let Some(path) = rfd::FileDialog::new()
                 .add_filter("audio", &["mp3", "wav"])
                 .pick_file()
@@ -223,8 +233,26 @@ fn visualizer_ui_system(
             }
         }
     });
-}
 
+    // ADDED: This is the new window for selecting a visualizer.
+    egui::Window::new("Visualizers").show(contexts.ctx_mut(), |ui| {
+        ui.label("Select a visualizer:");
+        ui.separator();
+
+        if ui.button("2D Bars").clicked() {
+            next_app_state.set(AppState::Visualization2D);
+            active_viz.0 = AppState::Visualization2D;
+        }
+        if ui.button("3D Cubes").clicked() {
+            next_app_state.set(AppState::Visualization3D);
+            active_viz.0 = AppState::Visualization3D;
+        }
+        if ui.button("3D Orb").clicked() {
+            next_app_state.set(AppState::VisualizationOrb);
+            active_viz.0 = AppState::VisualizationOrb;
+        }
+    });
+}
 
 fn create_menu_button(parent: &mut ChildBuilder, text: &str, action: MenuButtonAction) {
     parent.spawn((
