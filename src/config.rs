@@ -24,7 +24,7 @@ impl Default for VisualsConfig {
             bloom_intensity: 0.3,
             bloom_threshold: 0.8,
             bloom_color: Color::rgb(1.0, 0.2, 0.0),
-            num_bands: 16,
+            num_bands: 6,
             spread_enabled: true,
             viz2d_inactive_color: Color::rgb(0.2, 0.2, 0.8), // Dark Blue
             viz2d_active_color: Color::rgb(1.0, 0.3, 0.9),   // Bright Pink

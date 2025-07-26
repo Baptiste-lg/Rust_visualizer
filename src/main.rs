@@ -5,12 +5,12 @@ mod audio;
 mod ui;
 mod viz_2d;
 mod viz_3d;
+mod viz_orb;
 mod config;
 mod camera;
 
 // --- Plugin Imports ---
 use crate::config::VisualsConfig;
-// MODIFIED: Corrected imports to match the now-public items in the audio module
 use crate::audio::{AudioPlugin, SelectedAudioSource, MicStream};
 use bevy::prelude::*;
 use bevy_egui::EguiPlugin;
@@ -18,6 +18,7 @@ use rodio::{OutputStream, Sink};
 use ui::UiPlugin;
 use viz_2d::Viz2DPlugin;
 use viz_3d::Viz3DPlugin;
+use viz_orb::VizOrbPlugin;
 use camera::CameraPlugin;
 
 #[derive(States, Debug, Clone, PartialEq, Eq, Hash, Default)]
@@ -27,7 +28,20 @@ pub enum AppState {
     MicSelection,
     Visualization3D,
     Visualization2D,
+    VisualizationOrb,
 }
+
+// ADDED: This resource will store the last active visualization state.
+#[derive(Resource, Debug, Clone)]
+pub struct ActiveVisualization(pub AppState);
+
+impl Default for ActiveVisualization {
+    fn default() -> Self {
+        // The 3D cube visualizer will be the default when the app starts.
+        Self(AppState::Visualization3D)
+    }
+}
+
 
 #[derive(Resource, Debug)]
 pub struct VisualizationEnabled(pub bool);
@@ -52,6 +66,7 @@ fn main() {
         .init_resource::<VisualsConfig>()
         .init_resource::<SelectedAudioSource>()
         .init_resource::<VisualizationEnabled>()
+        .init_resource::<ActiveVisualization>() // ADDED: Initialize the new resource
         .init_state::<AppState>()
         .add_plugins((
             EguiPlugin,
@@ -59,6 +74,7 @@ fn main() {
             UiPlugin,
             Viz2DPlugin,
             Viz3DPlugin,
+            VizOrbPlugin,
             CameraPlugin,
         ))
         .run();
