@@ -1,76 +1,141 @@
 // src/viz_2d.rs
 
 use bevy::prelude::*;
-use crate::{AppState, audio::AudioAnalysis, VisualizationEnabled};
+use crate::{AppState, audio::AudioAnalysis, config::VisualsConfig, VisualizationEnabled};
 
 pub struct Viz2DPlugin;
+
+#[derive(Resource, Default)]
+struct BarChartState {
+    num_bands: usize,
+}
+
+#[derive(Component)]
+struct Viz2DScene;
 
 impl Plugin for Viz2DPlugin {
     fn build(&self, app: &mut App) {
         app
-            .add_systems(OnEnter(AppState::Visualization2D), setup_2d_visuals)
-            .add_systems(Update, update_2d_visuals
+            .init_resource::<BarChartState>()
+            .add_systems(OnEnter(AppState::Visualization2D), setup_2d_scene)
+            .add_systems(Update, (
+                manage_bar_chart,
+                update_2d_visuals.after(manage_bar_chart),
+            )
                 .run_if(in_state(AppState::Visualization2D))
                 .run_if(|viz_enabled: Res<VisualizationEnabled>| viz_enabled.0)
-            );
+            )
+            .add_systems(OnExit(AppState::Visualization2D), despawn_scene);
     }
 }
 
 #[derive(Component)]
-struct VizSquare;
+struct VizBar {
+    index: usize,
+}
 
-fn setup_2d_visuals(mut commands: Commands) {
-    info!("Setting up 2D visuals...");
-    commands.spawn(Camera2dBundle::default());
+fn setup_2d_scene(mut commands: Commands) {
+    commands.spawn((
+        SpatialBundle::default(),
+        Viz2DScene,
+    )).with_children(|parent| {
+        parent.spawn(Camera2dBundle::default());
+    });
+}
 
-    let square_size = 50.0;
-    let padding = 10.0;
-    let grid_size = 10;
+fn despawn_scene(mut commands: Commands, scene_query: Query<Entity, With<Viz2DScene>>) {
+    if let Ok(entity) = scene_query.get_single() {
+        commands.entity(entity).despawn_recursive();
+    }
+    commands.insert_resource(BarChartState::default());
+}
 
-    for x in 0..grid_size {
-        for y in 0..grid_size {
-            commands.spawn((
-                SpriteBundle {
-                    sprite: Sprite {
-                        color: Color::rgb(0.2, 0.2, 0.8),
-                        custom_size: Some(Vec2::new(square_size, square_size)),
-                        ..default()
-                    },
-                    transform: Transform::from_translation(Vec3::new(
-                        (x - grid_size / 2) as f32 * (square_size + padding),
-                        (y - grid_size / 2) as f32 * (square_size + padding),
-                        0.0,
-                    )),
-                    ..default()
-                },
-                VizSquare,
-            ));
+fn manage_bar_chart(
+    mut commands: Commands,
+    config: Res<VisualsConfig>,
+    mut chart_state: ResMut<BarChartState>,
+    bar_query: Query<Entity, With<VizBar>>,
+    scene_query: Query<Entity, With<Viz2DScene>>,
+) {
+    if config.is_changed() {
+        if let Ok(scene_entity) = scene_query.get_single() {
+            for entity in &bar_query {
+                commands.entity(entity).despawn_recursive();
+            }
+            spawn_visuals(commands, &config, scene_entity);
+            chart_state.num_bands = config.num_bands;
         }
     }
 }
 
-// MODIFIED: This now uses the new frequency bins for visualization.
+fn spawn_visuals(
+    mut commands: Commands,
+    config: &VisualsConfig,
+    parent_entity: Entity,
+) {
+    let num_bars = config.num_bands;
+    let bar_width = 40.0;
+    let spacing = 10.0;
+    let total_width = (num_bars as f32 * bar_width) + ((num_bars - 1) as f32 * spacing);
+    let start_x = -total_width / 2.0;
+
+    commands.entity(parent_entity).with_children(|parent| {
+        for i in 0..num_bars {
+            let x_pos = start_x + (i as f32 * (bar_width + spacing)) + bar_width / 2.0;
+            parent.spawn((
+                SpriteBundle {
+                    sprite: Sprite {
+                        color: config.viz2d_inactive_color,
+                        custom_size: Some(Vec2::new(bar_width, 50.0)),
+                        ..default()
+                    },
+                    transform: Transform::from_translation(Vec3::new(x_pos, 0.0, 0.0)),
+                    ..default()
+                },
+                VizBar { index: i },
+            ));
+        }
+    });
+}
+
 fn update_2d_visuals(
     audio_analysis: Res<AudioAnalysis>,
-    mut query: Query<(&mut Sprite, &mut Transform), With<VizSquare>>,
+    config: Res<VisualsConfig>,
+    mut query: Query<(&mut Sprite, &mut Transform, &VizBar)>,
 ) {
-    if audio_analysis.frequency_bins.is_empty() {
+    if audio_analysis.frequency_bins.len() != config.num_bands {
         return;
     }
 
-    // The first frequency bin (low bass) will control the color.
-    let bass_amplitude = audio_analysis.frequency_bins[0];
-    let bass_color = Color::rgb(
-        0.2 + bass_amplitude * 0.8,
-        0.2,
-        0.8 - bass_amplitude * 0.4
-    );
+    let smoothing_factor = 0.3;
 
-    // The overall treble average will control the scale of the squares.
-    let treble_scale = 1.0 + audio_analysis.treble_average * 0.05;
+    for (mut sprite, mut transform, bar) in &mut query {
+        if let Some(amplitude) = audio_analysis.frequency_bins.get(bar.index) {
+            let target_height = 50.0 + amplitude * config.bass_sensitivity * 100.0;
 
-    for (mut sprite, mut transform) in &mut query {
-        sprite.color = bass_color;
-        transform.scale = Vec3::splat(treble_scale);
+            let current_size = sprite.custom_size.unwrap_or(Vec2::ZERO);
+            let new_height = current_size.y + (target_height - current_size.y) * smoothing_factor;
+            sprite.custom_size = Some(Vec2::new(current_size.x, new_height));
+
+            transform.translation.y = new_height / 2.0 - 25.0;
+
+            // ====================================================================
+            // === FIXED COLOR INTERPOLATION FOR BEVY COMPATIBILITY ===
+            // ====================================================================
+            // Simple color mixing approach that works across Bevy versions
+            let color_intensity = (new_height / 800.0).clamp(0.0, 1.0);
+
+            // Extract RGBA components from both colors
+            let inactive = config.viz2d_inactive_color;
+            let active = config.viz2d_active_color;
+
+            // Manual linear interpolation of RGBA components
+            let r = inactive.r() + (active.r() - inactive.r()) * color_intensity;
+            let g = inactive.g() + (active.g() - inactive.g()) * color_intensity;
+            let b = inactive.b() + (active.b() - inactive.b()) * color_intensity;
+            let a = inactive.a() + (active.a() - inactive.a()) * color_intensity;
+
+            sprite.color = Color::rgba(r, g, b, a);
+        }
     }
 }

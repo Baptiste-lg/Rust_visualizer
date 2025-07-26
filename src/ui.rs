@@ -146,36 +146,56 @@ fn visualizer_ui_system(
     mut config: ResMut<VisualsConfig>,
     mut selected_source: ResMut<SelectedAudioSource>,
     mut viz_enabled: ResMut<VisualizationEnabled>,
+    app_state: Res<State<AppState>>,
 ) {
     egui::Window::new("Controls").show(contexts.ctx_mut(), |ui| {
         ui.label("Number of Bands");
         ui.add(egui::Slider::new(&mut config.num_bands, 4..=32).logarithmic(true));
 
-        // MODIFIED: Renamed "Bass Sensitivity" to "Amplitude Sensitivity"
         ui.label("Amplitude Sensitivity");
-        // NOTE: We're still using the `bass_sensitivity` field, just changing the label.
         ui.add(egui::Slider::new(&mut config.bass_sensitivity, 0.0..=20.0));
 
-        // ADDED: Checkbox to control the spread effect.
-        ui.checkbox(&mut config.spread_enabled, "Enable Cube Spread");
+        // --- 2D-Specific Controls ---
+        if *app_state.get() == AppState::Visualization2D {
+            ui.separator();
+            ui.label("Inactive Color");
+            let mut color_temp_inactive = [config.viz2d_inactive_color.r(), config.viz2d_inactive_color.g(), config.viz2d_inactive_color.b()];
+            if color_picker::color_edit_button_rgb(ui, &mut color_temp_inactive).changed() {
+                config.viz2d_inactive_color = Color::rgb(color_temp_inactive[0], color_temp_inactive[1], color_temp_inactive[2]);
+            }
 
-        ui.separator();
+            ui.label("Active Color");
+            let mut color_temp_active = [config.viz2d_active_color.r(), config.viz2d_active_color.g(), config.viz2d_active_color.b()];
+            if color_picker::color_edit_button_rgb(ui, &mut color_temp_active).changed() {
+                config.viz2d_active_color = Color::rgb(color_temp_active[0], color_temp_active[1], color_temp_active[2]);
+            }
+        }
 
-        ui.checkbox(&mut config.bloom_enabled, "Enable Bloom");
+        // --- 3D-Specific Controls ---
+        if *app_state.get() == AppState::Visualization3D {
+            ui.separator();
+            ui.checkbox(&mut config.spread_enabled, "Enable Cube Spread");
 
-        if config.bloom_enabled {
-            ui.label("Intensity");
-            ui.add(egui::Slider::new(&mut config.bloom_intensity, 0.0..=1.0));
-
-            ui.label("Threshold");
-            ui.add(egui::Slider::new(&mut config.bloom_threshold, 0.0..=2.0));
+            ui.label("Base Color");
+            let mut color_temp_base = [config.viz3d_base_color.r(), config.viz3d_base_color.g(), config.viz3d_base_color.b()];
+            if color_picker::color_edit_button_rgb(ui, &mut color_temp_base).changed() {
+                config.viz3d_base_color = Color::rgb(color_temp_base[0], color_temp_base[1], color_temp_base[2]);
+            }
 
             ui.separator();
+            ui.checkbox(&mut config.bloom_enabled, "Enable Bloom");
+            if config.bloom_enabled {
+                ui.label("Bloom Color");
+                let mut color_temp_bloom = [config.bloom_color.r(), config.bloom_color.g(), config.bloom_color.b()];
+                if color_picker::color_edit_button_rgb(ui, &mut color_temp_bloom).changed() {
+                    config.bloom_color = Color::rgb(color_temp_bloom[0], color_temp_bloom[1], color_temp_bloom[2]);
+                }
 
-            ui.label("Bloom Color");
-            let mut color_temp = [config.bloom_color.r(), config.bloom_color.g(), config.bloom_color.b()];
-            if color_picker::color_edit_button_rgb(ui, &mut color_temp).changed() {
-                config.bloom_color = Color::rgb(color_temp[0], color_temp[1], color_temp[2]);
+                ui.label("Intensity");
+                ui.add(egui::Slider::new(&mut config.bloom_intensity, 0.0..=1.0));
+
+                ui.label("Threshold");
+                ui.add(egui::Slider::new(&mut config.bloom_threshold, 0.0..=2.0));
             }
         }
 

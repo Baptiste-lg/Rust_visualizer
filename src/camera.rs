@@ -7,6 +7,7 @@ use bevy::{
     },
     input::mouse::{MouseMotion, MouseWheel},
     prelude::*,
+    render::camera::OrthographicProjection, // ADDED: Needed for 2D camera zoom
     window::PrimaryWindow
 };
 use bevy_egui::EguiContexts;
@@ -21,7 +22,9 @@ impl Plugin for CameraPlugin {
             .add_systems(Update, (
                 pan_orbit_camera,
                 update_bloom_settings
-            ).run_if(in_state(AppState::Visualization3D)));
+            ).run_if(in_state(AppState::Visualization3D)))
+            // ADDED: A new system for 2D camera controls.
+            .add_systems(Update, control_2d_camera.run_if(in_state(AppState::Visualization2D)));
     }
 }
 
@@ -47,14 +50,12 @@ fn setup_3d_scene_and_camera(mut commands: Commands) {
     commands.spawn((
         Camera3dBundle {
             transform: initial_transform,
-            // MODIFIED: We now use more advanced bloom settings for a better visual effect.
             camera: Camera {
-                hdr: true, // 1. HDR is required for bloom.
+                hdr: true,
                 ..default()
             },
             ..default()
         },
-        // 2. We initialize the bloom settings here.
         BloomSettings::default(),
         PanOrbitCamera::default(),
         TemporalAntiAliasBundle::default(),
@@ -71,7 +72,6 @@ fn setup_3d_scene_and_camera(mut commands: Commands) {
     });
 }
 
-// MODIFIED: This system now cleanly enables/disables bloom and applies settings from the UI.
 fn update_bloom_settings(
     config: Res<VisualsConfig>,
     mut camera_query: Query<(Entity, Option<&mut BloomSettings>), With<Camera>>,
@@ -81,7 +81,6 @@ fn update_bloom_settings(
 
     if config.bloom_enabled {
         match bloom_settings {
-            // If bloom is enabled and the component exists, we update it.
             Some(mut settings) => {
                 settings.intensity = config.bloom_intensity;
                 settings.low_frequency_boost = 0.7;
@@ -90,19 +89,50 @@ fn update_bloom_settings(
                 settings.prefilter_settings.threshold = config.bloom_threshold;
                 settings.prefilter_settings.threshold_softness = 0.6;
             }
-            // If bloom is enabled but the component is missing, we add it.
             None => {
                 commands.entity(camera_entity).insert(BloomSettings::default());
             }
         }
     } else {
-        // If bloom is disabled and the component exists, we remove it.
         if bloom_settings.is_some() {
             commands.entity(camera_entity).remove::<BloomSettings>();
         }
     }
 }
 
+// ADDED: This new system handles zoom and rotation for the 2D camera.
+fn control_2d_camera(
+    time: Res<Time>,
+    keyboard_input: Res<ButtonInput<KeyCode>>,
+    mut scroll_evr: EventReader<MouseWheel>,
+    mut camera_query: Query<(&mut Transform, &mut OrthographicProjection), With<Camera2d>>,
+    mut contexts: EguiContexts,
+) {
+    if contexts.ctx_mut().is_pointer_over_area() || contexts.ctx_mut().wants_pointer_input() {
+        scroll_evr.clear();
+        return;
+    }
+
+    if let Ok((mut transform, mut projection)) = camera_query.get_single_mut() {
+        // --- Rotation ---
+        let mut rotation_factor = 0.0;
+        if keyboard_input.pressed(KeyCode::KeyE) {
+            rotation_factor += 1.0;
+        }
+        if keyboard_input.pressed(KeyCode::KeyA) {
+            rotation_factor -= 1.0;
+        }
+        // Apply rotation
+        transform.rotate_z(rotation_factor * time.delta_seconds());
+
+        // --- Zoom ---
+        for ev in scroll_evr.read() {
+            projection.scale -= ev.y * 0.1;
+        }
+        // Ensure scale doesn't become negative
+        projection.scale = projection.scale.max(0.1);
+    }
+}
 
 fn pan_orbit_camera(
     primary_window: Query<&Window, With<PrimaryWindow>>,
