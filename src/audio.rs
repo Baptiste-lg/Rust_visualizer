@@ -6,8 +6,8 @@ use rodio::{Decoder, Sink, source::Source};
 use spectrum_analyzer::{samples_fft_to_spectrum, scaling::divide_by_N_sqrt, windows::hann_window, FrequencyLimit};
 use std::io::Cursor;
 use std::sync::mpsc::{Receiver, Sender};
-// MODIFIED: Added the new orb state
-use crate::{AppState, VisualizationEnabled, config::VisualsConfig, ActiveVisualization};
+// REMOVED: ActiveVisualization was not used in this file.
+use crate::{AppState, VisualizationEnabled, config::VisualsConfig};
 use std::path::PathBuf;
 use std::time::Duration;
 use std::collections::VecDeque;
@@ -79,7 +79,6 @@ impl Plugin for AudioPlugin {
                         .after(manage_audio_playback)
                         .run_if(|viz_enabled: Res<VisualizationEnabled>| viz_enabled.0),
                 )
-                // MODIFIED: Added the orb state to the run condition.
                 .run_if(in_state(AppState::Visualization2D)
                     .or_else(in_state(AppState::Visualization3D))
                     .or_else(in_state(AppState::VisualizationOrb)))
@@ -183,7 +182,6 @@ pub fn manage_audio_playback(
         }
         AudioSource::None => {
             info!("Stopping all audio");
-            // Clear the selection so we can re-trigger 'is_changed' next time
             selected_source.0 = AudioSource::None;
         }
     }

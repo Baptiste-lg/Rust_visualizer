@@ -5,7 +5,6 @@ use bevy_egui::{egui, EguiContexts, EguiSet};
 use bevy_egui::egui::color_picker;
 use crate::audio::{AudioSource, SelectedAudioSource, SelectedMic};
 use crate::config::VisualsConfig;
-// MODIFIED: Added ActiveVisualization to the imports
 use crate::{AppState, VisualizationEnabled, ActiveVisualization};
 use cpal::traits::{DeviceTrait, HostTrait};
 use bevy::window::PrimaryWindow;
@@ -34,7 +33,6 @@ impl Plugin for UiPlugin {
     }
 }
 
-// MODIFIED: Simplified menu actions
 #[derive(Component)]
 enum MenuButtonAction {
     Start,
@@ -57,7 +55,6 @@ fn setup_main_menu(mut commands: Commands) {
             },
             ..default()
         }, MainMenuUI)).with_children(|parent| {
-        // MODIFIED: Changed to a single "Start" button
         create_menu_button(parent, "Start Visualization", MenuButtonAction::Start);
         create_menu_button(parent, "Select Microphone", MenuButtonAction::ToMicSelection);
     });
@@ -66,14 +63,12 @@ fn setup_main_menu(mut commands: Commands) {
 fn menu_button_interaction(
     mut button_query: Query<(&Interaction, &MenuButtonAction), (Changed<Interaction>, With<Button>)>,
     mut next_app_state: ResMut<NextState<AppState>>,
-    // ADDED: Get the active visualization resource
     active_viz: Res<ActiveVisualization>,
 ) {
     for (interaction, action) in &mut button_query {
         if *interaction == Interaction::Pressed {
             match action {
                 MenuButtonAction::Start => {
-                    // MODIFIED: Go to the last active visualization state
                     next_app_state.set(active_viz.0.clone());
                 }
                 MenuButtonAction::ToMicSelection => {
@@ -150,9 +145,7 @@ fn visualizer_ui_system(
     mut selected_source: ResMut<SelectedAudioSource>,
     mut viz_enabled: ResMut<VisualizationEnabled>,
     app_state: Res<State<AppState>>,
-    // ADDED: Get the NextState to allow changing visualizers
     mut next_app_state: ResMut<NextState<AppState>>,
-    // ADDED: Get the active visualization to update it
     mut active_viz: ResMut<ActiveVisualization>,
 ) {
     egui::Window::new("Controls").show(contexts.ctx_mut(), |ui| {
@@ -204,9 +197,20 @@ fn visualizer_ui_system(
             }
         }
 
+        // MODIFIED: Added specific controls for the orb visualizer.
         if *app_state.get() == AppState::VisualizationOrb {
             ui.separator();
-            ui.label("Orb controls would go here.");
+            ui.label("Base Color");
+            let mut color_temp_base = [config.orb_base_color.r(), config.orb_base_color.g(), config.orb_base_color.b()];
+            if color_picker::color_edit_button_rgb(ui, &mut color_temp_base).changed() {
+                config.orb_base_color = Color::rgb(color_temp_base[0], color_temp_base[1], color_temp_base[2]);
+            }
+
+            ui.label("Peak Color");
+            let mut color_temp_peak = [config.orb_peak_color.r(), config.orb_peak_color.g(), config.orb_peak_color.b()];
+            if color_picker::color_edit_button_rgb(ui, &mut color_temp_peak).changed() {
+                config.orb_peak_color = Color::rgb(color_temp_peak[0], color_temp_peak[1], color_temp_peak[2]);
+            }
         }
 
         ui.separator();
@@ -234,7 +238,6 @@ fn visualizer_ui_system(
         }
     });
 
-    // ADDED: This is the new window for selecting a visualizer.
     egui::Window::new("Visualizers").show(contexts.ctx_mut(), |ui| {
         ui.label("Select a visualizer:");
         ui.separator();
