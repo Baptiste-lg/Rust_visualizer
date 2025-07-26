@@ -7,7 +7,9 @@ use bevy::prelude::*;
 pub struct VisualsConfig {
     // Multiplier for the intensity of the bass reaction.
     pub bass_sensitivity: f32,
-    // Other settings like colors, animation type, etc., could be added here.
+    // ADDED: Bloom effect settings
+    pub bloom_intensity: f32,
+    pub bloom_threshold: f32,
 }
 
 impl Default for VisualsConfig {
@@ -15,6 +17,9 @@ impl Default for VisualsConfig {
         Self {
             // A sensible default value.
             bass_sensitivity: 4.0,
+            // ADDED: Sensible defaults for bloom
+            bloom_intensity: 0.15,
+            bloom_threshold: 0.8,
         }
     }
 }

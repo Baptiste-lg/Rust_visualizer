@@ -6,7 +6,6 @@ use crate::audio::{AudioSource, SelectedAudioSource, SelectedMic};
 use crate::config::VisualsConfig;
 use crate::{AppState, VisualizationEnabled};
 use cpal::traits::{DeviceTrait, HostTrait};
-// MODIFIED: Import the PrimaryWindow component to check for it.
 use bevy::window::PrimaryWindow;
 
 
@@ -25,7 +24,6 @@ impl Plugin for UiPlugin {
                 Update,
                 visualizer_ui_system
                     .after(EguiSet::InitContexts)
-                    // MODIFIED: This is the correct way to check if the primary window exists.
                     .run_if(|q: Query<Entity, With<PrimaryWindow>>| !q.is_empty())
                     .run_if(in_state(AppState::Visualization2D).or_else(in_state(AppState::Visualization3D)))
             );
@@ -151,8 +149,16 @@ fn visualizer_ui_system(
     egui::Window::new("Controls").show(contexts.ctx_mut(), |ui| {
         ui.label("Bass Sensitivity");
         ui.add(egui::Slider::new(&mut config.bass_sensitivity, 0.0..=20.0));
-        ui.separator();
 
+        // MODIFIED: Added bloom controls
+        ui.separator();
+        ui.label("Bloom Settings");
+        ui.label("Intensity");
+        ui.add(egui::Slider::new(&mut config.bloom_intensity, 0.0..=1.0));
+        ui.label("Threshold");
+        ui.add(egui::Slider::new(&mut config.bloom_threshold, 0.0..=2.0));
+
+        ui.separator();
         let button_text = if viz_enabled.0 { "Deactivate Visualizer" } else { "Activate Visualizer" };
         if ui.button(button_text).clicked() {
             viz_enabled.0 = !viz_enabled.0;
