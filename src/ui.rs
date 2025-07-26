@@ -148,23 +148,44 @@ fn visualizer_ui_system(
     mut next_app_state: ResMut<NextState<AppState>>,
     mut active_viz: ResMut<ActiveVisualization>,
 ) {
+    let current_state = app_state.get();
+
     egui::Window::new("Controls").show(contexts.ctx_mut(), |ui| {
+        ui.heading("General");
         ui.label("Number of Bands");
         ui.add(egui::Slider::new(&mut config.num_bands, 4..=32).logarithmic(true));
 
         ui.label("Amplitude Sensitivity");
         ui.add(egui::Slider::new(&mut config.bass_sensitivity, 0.0..=8.0));
 
-        if *app_state.get() == AppState::Visualization2D {
-            // ... (code pour la 2D inchangé)
-        }
+        // --- CONTRÔLES SPÉCIFIQUES ---
 
-        if *app_state.get() == AppState::Visualization3D {
-            // ... (code pour la 3D inchangé)
-        }
-
-        if *app_state.get() == AppState::VisualizationOrb {
+        if *current_state == AppState::Visualization2D {
             ui.separator();
+            ui.heading("2D Bar Controls");
+            // ... (vous pouvez ajouter des contrôles pour la 2D ici si besoin)
+        }
+
+        if *current_state == AppState::Visualization3D {
+            ui.separator();
+            ui.heading("3D Cube Controls");
+
+            ui.checkbox(&mut config.spread_enabled, "Enable Spread Effect");
+
+            ui.label("Column Size");
+            ui.add(egui::Slider::new(&mut config.viz3d_column_size, 1..=16));
+
+            ui.label("Cube Base Color");
+            let mut color_temp = [config.viz3d_base_color.r(), config.viz3d_base_color.g(), config.viz3d_base_color.b()];
+            if color_picker::color_edit_button_rgb(ui, &mut color_temp).changed() {
+                config.viz3d_base_color = Color::rgb(color_temp[0], color_temp[1], color_temp[2]);
+            }
+        }
+
+        if *current_state == AppState::VisualizationOrb {
+            ui.separator();
+            ui.heading("3D Orb Controls");
+
             ui.label("Base Color");
             let mut color_temp_base = [config.orb_base_color.r(), config.orb_base_color.g(), config.orb_base_color.b()];
             if color_picker::color_edit_button_rgb(ui, &mut color_temp_base).changed() {
@@ -179,7 +200,6 @@ fn visualizer_ui_system(
 
             ui.separator();
 
-            // --- SLIDERS MIS À JOUR ---
             ui.label("Noise Speed");
             ui.add(egui::Slider::new(&mut config.orb_noise_speed, 0.1..=5.0));
 
@@ -190,12 +210,36 @@ fn visualizer_ui_system(
             ui.add(egui::Slider::new(&mut config.orb_treble_influence, 0.0..=1.0));
         }
 
+        // --- CONTRÔLES GLOBAUX ---
+
         ui.separator();
         let button_text = if viz_enabled.0 { "Deactivate Visualizer" } else { "Activate Visualizer" };
         if ui.button(button_text).clicked() {
             viz_enabled.0 = !viz_enabled.0;
         }
     });
+
+    // --- FENÊTRE POUR LE BLOOM (UNIQUEMENT DANS LES VUES 3D) ---
+
+    if *current_state == AppState::Visualization3D || *current_state == AppState::VisualizationOrb {
+        egui::Window::new("Bloom Settings").show(contexts.ctx_mut(), |ui| {
+            ui.checkbox(&mut config.bloom_enabled, "Enable Bloom");
+            if config.bloom_enabled {
+                ui.label("Intensity");
+                ui.add(egui::Slider::new(&mut config.bloom_intensity, 0.0..=1.0));
+
+                ui.label("Threshold");
+                ui.add(egui::Slider::new(&mut config.bloom_threshold, 0.0..=2.0));
+
+                ui.label("Bloom Color");
+                let mut color_temp_bloom = [config.bloom_color.r(), config.bloom_color.g(), config.bloom_color.b()];
+                if color_picker::color_edit_button_rgb(ui, &mut color_temp_bloom).changed() {
+                    config.bloom_color = Color::rgb(color_temp_bloom[0], color_temp_bloom[1], color_temp_bloom[2]);
+                }
+            }
+        });
+    }
+
 
     egui::Window::new("Audio Source").show(contexts.ctx_mut(), |ui| {
         ui.label(format!("Current Source: {:?}", selected_source.0));
