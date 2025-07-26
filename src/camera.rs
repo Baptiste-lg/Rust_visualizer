@@ -1,13 +1,18 @@
 // src/camera.rs
 
 use bevy::{
-    core_pipeline::bloom::BloomSettings,
+    // MODIFIED: Corrected the import path for post-processing components
+    core_pipeline::{
+        bloom::BloomSettings,
+        tonemapping::Tonemapping,
+        experimental::taa::TemporalAntiAliasBundle // Correct path for DebandDither/TAA
+    },
     input::mouse::{MouseMotion, MouseWheel},
     prelude::*,
     window::PrimaryWindow
 };
-// ADDED: Imports to check for UI interaction
-use bevy_egui::{egui, EguiContexts};
+// MODIFIED: Removed the unused 'egui' import and added EguiContexts
+use bevy_egui::EguiContexts;
 use crate::{AppState, config::VisualsConfig};
 
 pub struct CameraPlugin;
@@ -27,7 +32,6 @@ impl Plugin for CameraPlugin {
 pub struct PanOrbitCamera {
     pub focus: Vec3,
     pub radius: f32,
-    // REMOVED: The unused 'upside_down' field to fix the warning.
 }
 
 impl Default for PanOrbitCamera {
@@ -39,6 +43,7 @@ impl Default for PanOrbitCamera {
     }
 }
 
+// MODIFIED: The camera setup now includes the correct components for post-processing.
 fn setup_3d_scene_and_camera(mut commands: Commands) {
     let initial_transform = Transform::from_xyz(0.0, 0.0, 15.0)
         .looking_at(Vec3::ZERO, Vec3::Y);
@@ -49,7 +54,11 @@ fn setup_3d_scene_and_camera(mut commands: Commands) {
             ..default()
         },
         PanOrbitCamera::default(),
+        // --- Post-processing stack ---
         BloomSettings::default(),
+        Tonemapping::TonyMcMapface,
+        // Bevy 0.13 bundles DebandDither with Temporal Anti-Aliasing (TAA)
+        TemporalAntiAliasBundle::default(),
     ));
 
     commands.spawn(PointLightBundle {
@@ -69,8 +78,12 @@ fn update_bloom_settings(
 ) {
     if config.is_changed() {
         for mut bloom in camera_query.iter_mut() {
-            bloom.intensity = config.bloom_intensity;
-            bloom.prefilter_settings.threshold = config.bloom_threshold;
+            if config.bloom_enabled {
+                bloom.intensity = config.bloom_intensity;
+                bloom.prefilter_settings.threshold = config.bloom_threshold;
+            } else {
+                bloom.intensity = 0.0;
+            }
         }
     }
 }
@@ -81,21 +94,18 @@ fn pan_orbit_camera(
     mut ev_scroll: EventReader<MouseWheel>,
     input_mouse: Res<ButtonInput<MouseButton>>,
     mut query: Query<(&mut PanOrbitCamera, &mut Transform)>,
-    // ADDED: The EguiContexts resource to check for UI interaction
     mut contexts: EguiContexts,
 ) {
-    // ADDED: This guard clause prevents camera movement when the mouse is over a UI element.
     let ctx = contexts.ctx_mut();
     if ctx.is_pointer_over_area() || ctx.wants_pointer_input() {
-        ev_motion.clear(); // Consume the event to prevent it from being used by other systems
-        ev_scroll.clear(); // Consume the event
+        ev_motion.clear();
+        ev_scroll.clear();
         return;
     }
 
     let Ok(window) = primary_window.get_single() else { return };
 
     for (mut pan_orbit, mut transform) in query.iter_mut() {
-        // Orbit
         if input_mouse.pressed(MouseButton::Left) {
             let mut rotation = Vec2::ZERO;
             for ev in ev_motion.read() {
@@ -114,7 +124,6 @@ fn pan_orbit_camera(
             }
         }
 
-        // Zoom
         let mut scroll = 0.0;
         for ev in ev_scroll.read() {
             scroll += ev.y;
@@ -124,7 +133,6 @@ fn pan_orbit_camera(
             pan_orbit.radius = f32::max(pan_orbit.radius, 5.0);
         }
 
-        // Update transform
         let rot_matrix = Mat3::from_quat(transform.rotation);
         transform.translation = pan_orbit.focus + rot_matrix.mul_vec3(Vec3::new(0.0, 0.0, pan_orbit.radius));
     }

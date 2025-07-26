@@ -140,6 +140,7 @@ fn mic_selection_interaction(
     }
 }
 
+// MODIFIED: Added a checkbox and conditional UI for bloom controls.
 fn visualizer_ui_system(
     mut contexts: EguiContexts,
     mut config: ResMut<VisualsConfig>,
@@ -150,13 +151,18 @@ fn visualizer_ui_system(
         ui.label("Bass Sensitivity");
         ui.add(egui::Slider::new(&mut config.bass_sensitivity, 0.0..=20.0));
 
-        // MODIFIED: Added bloom controls
         ui.separator();
-        ui.label("Bloom Settings");
-        ui.label("Intensity");
-        ui.add(egui::Slider::new(&mut config.bloom_intensity, 0.0..=1.0));
-        ui.label("Threshold");
-        ui.add(egui::Slider::new(&mut config.bloom_threshold, 0.0..=2.0));
+
+        // Checkbox to enable/disable bloom
+        ui.checkbox(&mut config.bloom_enabled, "Enable Bloom");
+
+        // Only show bloom sliders if bloom is enabled
+        if config.bloom_enabled {
+            ui.label("Intensity");
+            ui.add(egui::Slider::new(&mut config.bloom_intensity, 0.0..=1.0));
+            ui.label("Threshold");
+            ui.add(egui::Slider::new(&mut config.bloom_threshold, 0.0..=2.0));
+        }
 
         ui.separator();
         let button_text = if viz_enabled.0 { "Deactivate Visualizer" } else { "Activate Visualizer" };

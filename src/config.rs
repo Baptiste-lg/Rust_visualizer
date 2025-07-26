@@ -2,12 +2,11 @@
 
 use bevy::prelude::*;
 
-// A resource to store user-configurable settings.
 #[derive(Resource)]
 pub struct VisualsConfig {
-    // Multiplier for the intensity of the bass reaction.
     pub bass_sensitivity: f32,
-    // ADDED: Bloom effect settings
+    // ADDED: A toggle for the bloom effect
+    pub bloom_enabled: bool,
     pub bloom_intensity: f32,
     pub bloom_threshold: f32,
 }
@@ -15,9 +14,9 @@ pub struct VisualsConfig {
 impl Default for VisualsConfig {
     fn default() -> Self {
         Self {
-            // A sensible default value.
             bass_sensitivity: 4.0,
-            // ADDED: Sensible defaults for bloom
+            // ADDED: Default bloom to be enabled
+            bloom_enabled: true,
             bloom_intensity: 0.15,
             bloom_threshold: 0.8,
         }
