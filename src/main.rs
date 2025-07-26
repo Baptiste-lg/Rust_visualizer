@@ -6,18 +6,19 @@ mod ui;
 mod viz_2d;
 mod viz_3d;
 mod config;
-mod camera; // ADDED
+mod camera;
 
 // --- Plugin Imports ---
 use crate::config::VisualsConfig;
-use audio::{AudioPlugin, SelectedAudioSource, MicStream};
+// MODIFIED: Corrected imports to match the now-public items in the audio module
+use crate::audio::{AudioPlugin, SelectedAudioSource, MicStream};
 use bevy::prelude::*;
 use bevy_egui::EguiPlugin;
 use rodio::{OutputStream, Sink};
 use ui::UiPlugin;
 use viz_2d::Viz2DPlugin;
 use viz_3d::Viz3DPlugin;
-use camera::CameraPlugin; // ADDED
+use camera::CameraPlugin;
 
 #[derive(States, Debug, Clone, PartialEq, Eq, Hash, Default)]
 pub enum AppState {
@@ -58,7 +59,7 @@ fn main() {
             UiPlugin,
             Viz2DPlugin,
             Viz3DPlugin,
-            CameraPlugin, // MODIFIED: Replaced ScenePlugin with CameraPlugin
+            CameraPlugin,
         ))
         .run();
 }

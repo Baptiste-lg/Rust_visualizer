@@ -6,11 +6,12 @@ use rodio::{Decoder, Sink, source::Source};
 use spectrum_analyzer::{samples_fft_to_spectrum, scaling::divide_by_N_sqrt, windows::hann_window, FrequencyLimit};
 use std::io::Cursor;
 use std::sync::mpsc::{Receiver, Sender};
-use crate::{AppState, VisualizationEnabled};
+use crate::{AppState, VisualizationEnabled, config::VisualsConfig};
 use std::path::PathBuf;
 use std::time::Duration;
 use std::collections::VecDeque;
 
+// This struct doesn't need to be public
 struct AudioDataTee<S> {
     source: S,
     sender: Sender<f32>,
@@ -42,6 +43,7 @@ where
 
 pub struct AudioPlugin;
 
+// Made public so it can be used in the App build
 #[derive(Resource)]
 pub struct AnalysisTimer(pub Timer);
 
@@ -82,15 +84,13 @@ impl Plugin for AudioPlugin {
 }
 
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+// MODIFIED: This enum and its variants must be public to be used in other modules.
+#[derive(Resource, Debug, Clone, PartialEq, Eq, Default)]
 pub enum AudioSource {
     File(PathBuf),
     Microphone,
+    #[default]
     None,
-}
-
-impl Default for AudioSource {
-    fn default() -> Self { AudioSource::None }
 }
 
 #[derive(Resource, Default)]
@@ -98,6 +98,7 @@ pub struct SelectedAudioSource(pub AudioSource);
 
 #[derive(Resource, Default)]
 pub struct SelectedMic(pub Option<String>);
+
 #[derive(Resource, Clone)]
 pub struct MicAudioSender(pub Sender<Vec<f32>>);
 pub struct MicAudioReceiver(pub Receiver<Vec<f32>>);
@@ -119,10 +120,9 @@ pub struct AudioAnalysis {
     pub treble_average: f32,
 }
 
-// THIS IS THE FUNCTION THAT WAS MISSING
-fn manage_audio_playback(
+pub fn manage_audio_playback(
     mut commands: Commands,
-    selected_source: Res<SelectedAudioSource>,
+    mut selected_source: ResMut<SelectedAudioSource>,
     sink: NonSend<Sink>,
     mut mic_stream: NonSendMut<MicStream>,
     mic_sender: Res<MicAudioSender>,
@@ -179,18 +179,18 @@ fn manage_audio_playback(
         }
         AudioSource::None => {
             info!("Stopping all audio");
+            // Clear the selection so we can re-trigger 'is_changed' next time
+            selected_source.0 = AudioSource::None;
         }
     }
 }
 
-// THIS IS THE FUNCTION THAT WAS MISSING
 pub fn read_analysis_data_system(receiver: Option<NonSend<AnalysisAudioReceiver>>, mut buffer: ResMut<AudioSamples>) {
     if let Some(receiver) = receiver {
         buffer.0.extend(receiver.0.try_iter());
     }
 }
 
-// THIS IS THE FUNCTION THAT WAS MISSING
 pub fn read_mic_data_system(receiver: Option<NonSend<MicAudioReceiver>>, mut buffer: ResMut<MicAudioBuffer>) {
     if let Some(receiver) = receiver {
         for new_data in receiver.0.try_iter() {
@@ -207,6 +207,7 @@ pub fn audio_analysis_system(
     audio_source: Res<SelectedAudioSource>,
     mut audio_samples: ResMut<AudioSamples>,
     mut mic_buffer: ResMut<MicAudioBuffer>,
+    config: Res<VisualsConfig>,
 ) {
     analysis_timer.0.tick(time.delta());
     if !analysis_timer.0.just_finished() {
@@ -252,14 +253,20 @@ pub fn audio_analysis_system(
         Some(&divide_by_N_sqrt),
     ).expect("Failed to compute spectrum");
 
-    const NUM_BANDS: usize = 8;
-    let mut new_bins = vec![0.0; NUM_BANDS];
-    let band_limits = [50.0, 150.0, 300.0, 500.0, 1000.0, 2000.0, 5000.0, 15000.0];
+    let num_bands = config.num_bands;
+    let mut new_bins = vec![0.0; num_bands];
+
+    let min_freq = 20.0f32;
+    let max_freq = 20000.0f32;
+    let band_limits: Vec<f32> = (0..num_bands).map(|i| {
+        min_freq * (max_freq / min_freq).powf((i as f32 + 1.0) / num_bands as f32)
+    }).collect();
+
     let mut current_band = 0;
     let mut treble_val = 0.0;
 
     for (freq, val) in spectrum.data() {
-        if current_band < NUM_BANDS -1 && freq.val() > band_limits[current_band] {
+        if current_band < num_bands - 1 && freq.val() > band_limits[current_band] {
             current_band += 1;
         }
         new_bins[current_band] += val.val();
@@ -270,12 +277,12 @@ pub fn audio_analysis_system(
     }
 
     let smoothing = 0.5;
-    if audio_analysis.frequency_bins.len() != NUM_BANDS {
-        audio_analysis.frequency_bins = new_bins;
-    } else {
-        for i in 0..NUM_BANDS {
-            audio_analysis.frequency_bins[i] = audio_analysis.frequency_bins[i] * smoothing + new_bins[i] * (1.0 - smoothing);
-        }
+    if audio_analysis.frequency_bins.len() != num_bands {
+        audio_analysis.frequency_bins.resize(num_bands, 0.0);
+    }
+
+    for i in 0..num_bands {
+        audio_analysis.frequency_bins[i] = audio_analysis.frequency_bins[i] * smoothing + new_bins[i] * (1.0 - smoothing);
     }
     audio_analysis.treble_average = audio_analysis.treble_average * smoothing + treble_val * (1.0 - smoothing);
 }
