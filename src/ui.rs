@@ -153,7 +153,7 @@ fn visualizer_ui_system(
         ui.add(egui::Slider::new(&mut config.num_bands, 4..=32).logarithmic(true));
 
         ui.label("Amplitude Sensitivity");
-        ui.add(egui::Slider::new(&mut config.bass_sensitivity, 0.0..=4.0));
+        ui.add(egui::Slider::new(&mut config.bass_sensitivity, 0.0..=8.0));
 
         if *app_state.get() == AppState::Visualization2D {
             // ... (code pour la 2D inchangé)
@@ -179,7 +179,7 @@ fn visualizer_ui_system(
 
             ui.separator();
 
-            // --- NOUVEAUX SLIDERS ---
+            // --- SLIDERS MIS À JOUR ---
             ui.label("Noise Speed");
             ui.add(egui::Slider::new(&mut config.orb_noise_speed, 0.1..=5.0));
 
@@ -234,7 +234,6 @@ fn visualizer_ui_system(
     });
 }
 
-// ... (reste du fichier inchangé)
 fn create_menu_button(parent: &mut ChildBuilder, text: &str, action: MenuButtonAction) {
     parent.spawn((
             ButtonBundle {

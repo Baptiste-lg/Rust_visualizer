@@ -13,7 +13,7 @@ pub struct VizOrbPlugin;
 #[derive(Component)]
 struct OrbVisual;
 
-// NOUVEAU : Un composant pour stocker l'état de notre orbe déformable
+// Un composant pour stocker l'état de notre orbe déformable
 #[derive(Component)]
 struct DeformableOrb {
     original_vertices: Vec<[f32; 3]>,
@@ -39,10 +39,14 @@ fn setup_orb(
     mut materials: ResMut<Assets<StandardMaterial>>,
     config: Res<VisualsConfig>,
 ) {
-    // Création du mesh de la sphère
-    let sphere_mesh = Sphere::new(3.0).mesh().ico(5).unwrap();
+    // 1. On crée le maillage de base
+    let mut sphere_mesh = Sphere::new(3.0).mesh().ico(5).unwrap();
 
-    // On extrait les positions originales des vertices AVANT de le déplacer
+    // 2. ON LE DÉPLIE IMMÉDIATEMENT pour le rendre compatible avec compute_flat_normals
+    sphere_mesh.duplicate_vertices();
+    sphere_mesh.compute_flat_normals();
+
+    // 3. On extrait les positions originales du maillage DÉPLIÉ
     let original_vertices = match sphere_mesh.attribute(Mesh::ATTRIBUTE_POSITION) {
         Some(VertexAttributeValues::Float32x3(vertices)) => vertices.clone(),
         _ => Vec::new(),
@@ -51,19 +55,19 @@ fn setup_orb(
     // On crée l'entité de la sphère
     commands.spawn((
         PbrBundle {
-            mesh: meshes.add(sphere_mesh),
+            mesh: meshes.add(sphere_mesh), // On ajoute le maillage déjà préparé
             material: materials.add(StandardMaterial {
                 base_color: config.orb_base_color,
-                perceptual_roughness: 0.6,
+                perceptual_roughness: 0.8,
                 metallic: 0.2,
-                emissive: config.orb_base_color, // Un peu d'émission pour le look
+                emissive: config.orb_base_color,
                 ..default()
             }),
             ..default()
         },
         DeformableOrb {
             original_vertices,
-            noise: Perlin::new(1), // Seed pour le bruit
+            noise: Perlin::new(1),
         },
         OrbVisual,
     ));
@@ -88,7 +92,6 @@ fn deform_orb(
 
             if let VertexAttributeValues::Float32x3(vertex_data) = vertices {
                 if vertex_data.len() != orb.original_vertices.len() {
-                    warn!("Vertex count mismatch, skipping deformation this frame.");
                     continue;
                 }
 
@@ -113,7 +116,7 @@ fn deform_orb(
                 }
             }
 
-            // MODIFIÉ : On utilise la fonction que votre version de Bevy connaît.
+            // Le maillage étant déjà déplié, cet appel est maintenant SANS DANGER.
             mesh.compute_flat_normals();
         }
 
@@ -123,7 +126,6 @@ fn deform_orb(
         }
     }
 }
-
 
 fn despawn_orb_visuals(
     mut commands: Commands,
