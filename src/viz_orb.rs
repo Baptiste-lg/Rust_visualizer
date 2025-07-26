@@ -13,17 +13,23 @@ impl Plugin for VizOrbPlugin {
                 .run_if(in_state(AppState::VisualizationOrb))
                 .run_if(|viz_enabled: Res<VisualizationEnabled>| viz_enabled.0)
             )
-            .add_systems(OnExit(AppState::VisualizationOrb), despawn_orb);
+            .add_systems(OnExit(AppState::VisualizationOrb), despawn_orb_visuals);
     }
 }
 
+// Component to tag all entities belonging to the orb scene for easy cleanup
 #[derive(Component)]
-struct Orb;
+struct OrbVisual;
 
+// Component for the parent entity that will rotate
 #[derive(Component)]
-struct OrbSpike {
+struct OrbCenter;
+
+// MODIFIED: This now represents a deformer that will push the orb's mesh outwards
+#[derive(Component)]
+struct OrbDeformer {
     band: usize,
-    angle: f32,
+    direction: Vec3,
 }
 
 fn setup_orb(
@@ -32,38 +38,55 @@ fn setup_orb(
     mut materials: ResMut<Assets<StandardMaterial>>,
     config: Res<VisualsConfig>,
 ) {
-    // Main Orb
-    commands.spawn((
-        PbrBundle {
-            mesh: meshes.add(Sphere::new(1.0).mesh().ico(5).unwrap()),
+    // This is the parent entity that everything will rotate around.
+    // It has no mesh itself.
+    let parent = commands.spawn((
+        SpatialBundle::default(),
+        OrbCenter,
+        OrbVisual,
+    )).id();
+
+    // MODIFIED: This is the visible sphere. It's a child of the rotating parent.
+    // We will use a high-resolution IcoSphere for smoother deformation.
+    let sphere_mesh = meshes.add(Sphere::new(1.0).mesh().ico(7).unwrap());
+
+    commands.entity(parent).with_children(|p| {
+        p.spawn(PbrBundle {
+            mesh: sphere_mesh,
             material: materials.add(StandardMaterial {
                 base_color: Color::rgb(0.8, 0.7, 0.6),
+                perceptual_roughness: 0.8,
                 ..default()
             }),
             transform: Transform::from_scale(Vec3::splat(5.0)),
             ..default()
-        },
-        Orb,
-    ));
+        });
+    });
 
-    // Spikes for each band
-    let num_spikes = config.num_bands;
-    for i in 0..num_spikes {
-        let angle = i as f32 * (2.0 * std::f32::consts::PI / num_spikes as f32);
-        let x = angle.cos();
-        let y = angle.sin();
+    // MODIFIED: These are no longer visible spikes. They are invisible deformers.
+    // We create one deformer for each frequency band.
+    let num_deformers = config.num_bands;
+    for i in 0..num_deformers {
+        // We use a mathematical formula to distribute points evenly on a sphere's surface.
+        // This ensures the stretching effect is uniform around the orb.
+        let (x, y, z) = {
+            let golden_ratio = (1.0 + 5.0f32.sqrt()) / 2.0;
+            let i_f = i as f32;
+            let n_f = num_deformers as f32;
+            let y_coord = 1.0 - (2.0 * i_f) / (n_f - 1.0);
+            let radius = (1.0 - y_coord * y_coord).sqrt();
+            let theta = golden_ratio * i_f * std::f32::consts::TAU; // Use TAU for full circle
+            (theta.cos() * radius, y_coord, theta.sin() * radius)
+        };
 
+        // This is the direction the orb will stretch in for this frequency band.
+        let direction = Vec3::new(x, y, z).normalize();
+
+        // Spawn a deformer entity. It has no mesh or visuals.
         commands.spawn((
-            PbrBundle {
-                mesh: meshes.add(Sphere::new(1.0).mesh().ico(3).unwrap()),
-                material: materials.add(StandardMaterial {
-                    base_color: Color::rgb(1.0, 0.2, 0.2),
-                    ..default()
-                }),
-                transform: Transform::from_translation(Vec3::new(x, y, 0.0) * 6.0),
-                ..default()
-            },
-            OrbSpike { band: i, angle },
+            SpatialBundle::default(),
+            OrbDeformer { band: i, direction },
+            OrbVisual,
         ));
     }
 }
@@ -72,11 +95,15 @@ fn update_orb(
     time: Res<Time>,
     audio_analysis: Res<AudioAnalysis>,
     config: Res<VisualsConfig>,
-    mut orb_query: Query<&mut Transform, (With<Orb>, Without<OrbSpike>)>,
-    mut spike_query: Query<(&mut Transform, &OrbSpike), With<OrbSpike>>,
+    mut center_query: Query<&mut Transform, With<OrbCenter>>,
+    // MODIFIED: We query for the OrbDeformers and the single sphere mesh handle
+    deformer_query: Query<&OrbDeformer>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    // We query for the mesh handle on the visible sphere
+    sphere_query: Query<&Handle<Mesh>, (Without<OrbCenter>, Without<OrbDeformer>)>,
 ) {
-    // Rotate the main orb
-    for mut transform in orb_query.iter_mut() {
+    // Rotate the parent entity, which makes the whole orb spin
+    if let Ok(mut transform) = center_query.get_single_mut() {
         transform.rotate_y(time.delta_seconds() * 0.1);
         transform.rotate_x(time.delta_seconds() * 0.05);
     }
@@ -85,29 +112,51 @@ fn update_orb(
         return;
     }
 
-    // Update spikes based on audio
-    for (mut transform, spike) in spike_query.iter_mut() {
-        if let Some(amplitude) = audio_analysis.frequency_bins.get(spike.band) {
-            let scale = 0.5 + amplitude * 2.0;
-            transform.scale = Vec3::splat(scale.clamp(0.1, 5.0));
+    // Get the actual mesh asset so we can modify it
+    let Ok(mesh_handle) = sphere_query.get_single() else { return };
+    let Some(mesh) = meshes.get_mut(mesh_handle) else { return };
+    let Some(VertexAttributeValues::Float32x3(positions)) = mesh.attribute_mut(Mesh::ATTRIBUTE_POSITION) else { return };
 
-            let radius = 6.0 + amplitude * 1.5;
-            let x = spike.angle.cos() * radius;
-            let y = spike.angle.sin() * radius;
-            transform.translation = Vec3::new(x, y, 0.0);
+    // This vector will store the total "push" for each vertex in the mesh
+    let mut offsets = vec![Vec3::ZERO; positions.len()];
+
+    // For each deformer, calculate how much it should push the mesh vertices
+    for deformer in &deformer_query {
+        if let Some(amplitude) = audio_analysis.frequency_bins.get(deformer.band) {
+            // The strength of the stretch is based on the music's amplitude
+            let stretch_strength = (amplitude * config.bass_sensitivity * 0.1).clamp(0.0, 1.0);
+
+            if stretch_strength < 0.01 { continue; } // Skip if no sound
+
+            // Go through every vertex in the sphere's mesh
+            for i in 0..positions.len() {
+                let vertex_pos = Vec3::from_slice(&positions[i]).normalize();
+
+                // We calculate how "aligned" the vertex is with the deformer's direction.
+                // A vertex directly in line with the deformer gets the full push.
+                // A vertex on the side gets less push.
+                let alignment = vertex_pos.dot(deformer.direction).clamp(0.0, 1.0);
+
+                // The final offset is the deformer's direction multiplied by its strength and alignment.
+                // We use a power of 4 to make the stretch more focused and "bumpy".
+                offsets[i] += deformer.direction * stretch_strength * alignment.powf(4.0);
+            }
         }
+    }
+
+    // Finally, apply the calculated offsets to each vertex position
+    for i in 0..positions.len() {
+        // We start with the original vertex position (normalized to form a perfect sphere)
+        // and add the calculated offset to it.
+        let base_pos = Vec3::from_slice(&positions[i]).normalize();
+        let new_pos = base_pos + offsets[i];
+        positions[i] = new_pos.to_array();
     }
 }
 
-fn despawn_orb(
-    mut commands: Commands,
-    orb_query: Query<Entity, With<Orb>>,
-    spike_query: Query<Entity, With<OrbSpike>>,
-) {
-    for entity in orb_query.iter() {
-        commands.entity(entity).despawn_recursive();
-    }
-    for entity in spike_query.iter() {
+
+fn despawn_orb_visuals(mut commands: Commands, query: Query<Entity, With<OrbVisual>>) {
+    for entity in &query {
         commands.entity(entity).despawn_recursive();
     }
 }

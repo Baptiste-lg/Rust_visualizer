@@ -8,7 +8,6 @@ pub struct Viz3DPlugin;
 #[derive(Resource, Default)]
 struct VoxelGridState {
     num_bands: usize,
-    // ADDED: We also track the base color to know when to rebuild.
     base_color: Color,
 }
 
@@ -23,6 +22,7 @@ impl Plugin for Viz3DPlugin {
                 .run_if(in_state(AppState::Visualization3D))
                 .run_if(|viz_enabled: Res<VisualizationEnabled>| viz_enabled.0)
             )
+            // MODIFIED: Corrected the despawn system call
             .add_systems(OnExit(AppState::Visualization3D), (despawn_visuals, |mut state: ResMut<VoxelGridState>| *state = VoxelGridState::default()));
     }
 }
@@ -41,9 +41,9 @@ fn manage_voxel_grid(
     materials: ResMut<Assets<StandardMaterial>>,
     cube_query: Query<Entity, With<VisualizerCube>>,
 ) {
-    // MODIFIED: The grid now rebuilds if the number of bands OR the base color changes.
     if config.num_bands != grid_state.num_bands || config.viz3d_base_color != grid_state.base_color {
         info!("3D visual config changed. Rebuilding voxel grid...");
+        // MODIFIED: Pass commands and query correctly
         despawn_visuals(commands.reborrow(), cube_query);
         spawn_visuals(commands.reborrow(), meshes, materials, &config);
         grid_state.num_bands = config.num_bands;
@@ -77,7 +77,6 @@ fn spawn_visuals(
             let initial_pos = Vec3::new(x_pos, 0.0, z_pos);
 
             let material = materials.add(StandardMaterial {
-                // MODIFIED: Use the base color from the config.
                 base_color: config.viz3d_base_color,
                 emissive: Color::BLACK,
                 metallic: 1.0,
