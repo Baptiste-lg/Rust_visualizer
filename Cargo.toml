@@ -10,3 +10,9 @@ cpal = "0.15"
 spectrum-analyzer = "1.7"
 bevy_egui = "0.27"
 rfd = "0.14"
+noise = "0.8.2"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1

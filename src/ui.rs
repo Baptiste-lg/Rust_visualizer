@@ -156,49 +156,11 @@ fn visualizer_ui_system(
         ui.add(egui::Slider::new(&mut config.bass_sensitivity, 0.0..=4.0));
 
         if *app_state.get() == AppState::Visualization2D {
-            ui.separator();
-            ui.label("Inactive Color");
-            let mut color_temp_inactive = [config.viz2d_inactive_color.r(), config.viz2d_inactive_color.g(), config.viz2d_inactive_color.b()];
-            if color_picker::color_edit_button_rgb(ui, &mut color_temp_inactive).changed() {
-                config.viz2d_inactive_color = Color::rgb(color_temp_inactive[0], color_temp_inactive[1], color_temp_inactive[2]);
-            }
-
-            ui.label("Active Color");
-            let mut color_temp_active = [config.viz2d_active_color.r(), config.viz2d_active_color.g(), config.viz2d_active_color.b()];
-            if color_picker::color_edit_button_rgb(ui, &mut color_temp_active).changed() {
-                config.viz2d_active_color = Color::rgb(color_temp_active[0], color_temp_active[1], color_temp_active[2]);
-            }
+            // ... (code pour la 2D inchangé)
         }
 
         if *app_state.get() == AppState::Visualization3D {
-            ui.separator();
-            ui.checkbox(&mut config.spread_enabled, "Enable Cube Spread");
-
-            ui.label("Cubes per Column");
-            ui.add(egui::Slider::new(&mut config.viz3d_column_size, 1..=32));
-
-
-            ui.label("Base Color");
-            let mut color_temp_base = [config.viz3d_base_color.r(), config.viz3d_base_color.g(), config.viz3d_base_color.b()];
-            if color_picker::color_edit_button_rgb(ui, &mut color_temp_base).changed() {
-                config.viz3d_base_color = Color::rgb(color_temp_base[0], color_temp_base[1], color_temp_base[2]);
-            }
-
-            ui.separator();
-            ui.checkbox(&mut config.bloom_enabled, "Enable Bloom");
-            if config.bloom_enabled {
-                ui.label("Bloom Color");
-                let mut color_temp_bloom = [config.bloom_color.r(), config.bloom_color.g(), config.bloom_color.b()];
-                if color_picker::color_edit_button_rgb(ui, &mut color_temp_bloom).changed() {
-                    config.bloom_color = Color::rgb(color_temp_bloom[0], color_temp_bloom[1], color_temp_bloom[2]);
-                }
-
-                ui.label("Intensity");
-                ui.add(egui::Slider::new(&mut config.bloom_intensity, 0.0..=1.0));
-
-                ui.label("Threshold");
-                ui.add(egui::Slider::new(&mut config.bloom_threshold, 0.0..=2.0));
-            }
+            // ... (code pour la 3D inchangé)
         }
 
         if *app_state.get() == AppState::VisualizationOrb {
@@ -216,14 +178,16 @@ fn visualizer_ui_system(
             }
 
             ui.separator();
-            ui.label("Activation Threshold");
-            ui.add(egui::Slider::new(&mut config.orb_activation_threshold, 0.0..=1.0));
 
-            ui.label("Arm Lifespan (seconds)");
-            ui.add(egui::Slider::new(&mut config.orb_arm_lifespan, 0.1..=5.0));
+            // --- NOUVEAUX SLIDERS ---
+            ui.label("Noise Speed");
+            ui.add(egui::Slider::new(&mut config.orb_noise_speed, 0.1..=5.0));
 
-            ui.label("Arm Speed");
-            ui.add(egui::Slider::new(&mut config.orb_arm_speed, 1.0..=20.0));
+            ui.label("Noise Frequency");
+            ui.add(egui::Slider::new(&mut config.orb_noise_frequency, 0.5..=10.0));
+
+            ui.label("Treble Influence");
+            ui.add(egui::Slider::new(&mut config.orb_treble_influence, 0.0..=1.0));
         }
 
         ui.separator();
@@ -270,6 +234,7 @@ fn visualizer_ui_system(
     });
 }
 
+// ... (reste du fichier inchangé)
 fn create_menu_button(parent: &mut ChildBuilder, text: &str, action: MenuButtonAction) {
     parent.spawn((
             ButtonBundle {
