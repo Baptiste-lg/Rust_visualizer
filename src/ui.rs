@@ -215,8 +215,15 @@ fn visualizer_ui_system(
                 config.orb_peak_color = Color::rgb(color_temp_peak[0], color_temp_peak[1], color_temp_peak[2]);
             }
 
-            ui.label("Arm Smoothing");
-            ui.add(egui::Slider::new(&mut config.orb_smoothing, 0.01..=0.5));
+            ui.separator();
+            ui.label("Activation Threshold");
+            ui.add(egui::Slider::new(&mut config.orb_activation_threshold, 0.0..=1.0));
+
+            ui.label("Arm Lifespan (seconds)");
+            ui.add(egui::Slider::new(&mut config.orb_arm_lifespan, 0.1..=5.0));
+
+            ui.label("Arm Speed");
+            ui.add(egui::Slider::new(&mut config.orb_arm_speed, 1.0..=20.0));
         }
 
         ui.separator();

@@ -4,63 +4,39 @@ use bevy::prelude::*;
 use bevy::render::mesh::VertexAttributeValues;
 use bevy::math::primitives::Capsule3d;
 use crate::{AppState, audio::AudioAnalysis, config::VisualsConfig, VisualizationEnabled};
+use std::time::Duration;
 
 pub struct VizOrbPlugin;
 
-// This resource's only job is to track if the config has changed.
-#[derive(Resource, Default)]
-struct OrbState {
-    num_bands: usize,
-    base_color: Color,
-    peak_color: Color,
+// Un tag pour tous les éléments visuels de l'orbe
+#[derive(Component)]
+struct OrbVisual;
+
+// Un tag pour le projectile
+#[derive(Component)]
+struct OrbProjectile {
+    direction: Vec3,
+    lifespan: Timer,
+}
+
+// Ressource pour stocker les directions et les cooldowns de tir
+#[derive(Resource)]
+struct OrbProjetileInfo {
+    directions: Vec<Vec3>,
+    cooldowns: Vec<Timer>,
 }
 
 impl Plugin for VizOrbPlugin {
     fn build(&self, app: &mut App) {
         app
-            .init_resource::<OrbState>()
             .add_systems(OnEnter(AppState::VisualizationOrb), setup_orb)
             .add_systems(Update, (
-                manage_orb,
-                update_orb_arms.after(manage_orb),
-            )
-                .run_if(in_state(AppState::VisualizationOrb))
-                .run_if(|viz_enabled: Res<VisualizationEnabled>| viz_enabled.0)
+                    spawn_orb_projectiles,
+                    move_and_cull_projectiles
+                ).run_if(in_state(AppState::VisualizationOrb))
+                 .run_if(|viz_enabled: Res<VisualizationEnabled>| viz_enabled.0)
             )
             .add_systems(OnExit(AppState::VisualizationOrb), despawn_orb_visuals);
-    }
-}
-
-// A component to tag all entities related to the orb for easy cleanup
-#[derive(Component)]
-struct OrbVisual;
-
-// A component for the extending arms
-#[derive(Component)]
-struct OrbArm {
-    band: usize,
-}
-
-fn manage_orb(
-    mut commands: Commands,
-    config: Res<VisualsConfig>,
-    mut orb_state: ResMut<OrbState>,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-    query: Query<Entity, With<OrbVisual>>,
-) {
-    if config.num_bands != orb_state.num_bands ||
-       config.orb_base_color != orb_state.base_color ||
-       config.orb_peak_color != orb_state.peak_color
-    {
-        info!("Orb config changed. Rebuilding...");
-        for entity in &query {
-            commands.entity(entity).despawn_recursive();
-        }
-        spawn_orb_entities(&mut commands, &mut meshes, &mut materials, &config);
-        orb_state.num_bands = config.num_bands;
-        orb_state.base_color = config.orb_base_color;
-        orb_state.peak_color = config.orb_peak_color;
     }
 }
 
@@ -69,30 +45,8 @@ fn setup_orb(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     config: Res<VisualsConfig>,
-    mut orb_state: ResMut<OrbState>,
 ) {
-    spawn_orb_entities(&mut commands, &mut meshes, &mut materials, &config);
-    orb_state.num_bands = config.num_bands;
-    orb_state.base_color = config.orb_base_color;
-    orb_state.peak_color = config.orb_peak_color;
-}
-
-// This function now creates a central sphere and separate, custom-colored arms.
-fn spawn_orb_entities(
-    commands: &mut Commands,
-    meshes: &mut ResMut<Assets<Mesh>>,
-    materials: &mut ResMut<Assets<StandardMaterial>>,
-    config: &VisualsConfig,
-) {
-    // Create the material that will be shared by the arms.
-    let arm_material = materials.add(StandardMaterial {
-        base_color: Color::WHITE,
-        perceptual_roughness: 0.6,
-        metallic: 0.2,
-        ..default()
-    });
-
-    // Spawn the central, non-deforming sphere.
+    // Crée la sphère centrale
     commands.spawn((
         PbrBundle {
             mesh: meshes.add(Sphere::new(1.0).mesh().ico(5).unwrap()),
@@ -108,79 +62,151 @@ fn spawn_orb_entities(
         OrbVisual,
     ));
 
-    let num_arms = config.num_bands;
-    for i in 0..num_arms {
-        let mut arm_mesh: Mesh = Capsule3d::new(0.5, 1.0).into();
+    // Pré-calcule les directions et initialise les timers de cooldown
+    let num_bands = config.num_bands;
+    let mut directions = Vec::with_capacity(num_bands);
+    let mut cooldowns = Vec::with_capacity(num_bands);
 
-        if let Some(VertexAttributeValues::Float32x3(positions)) = arm_mesh.attribute(Mesh::ATTRIBUTE_POSITION) {
-            let mut colors = Vec::with_capacity(positions.len());
-            let min_y = positions.iter().map(|p| p[1]).reduce(f32::min).unwrap_or(-1.0);
-            let max_y = positions.iter().map(|p| p[1]).reduce(f32::max).unwrap_or(1.0);
+    for i in 0..num_bands {
+        let golden_ratio = (1.0 + 5.0f32.sqrt()) / 2.0;
+        let i_f = i as f32;
+        let n_f = num_bands as f32;
+        let y_coord = 1.0 - (2.0 * i_f) / (n_f - 1.0);
+        let radius = (1.0 - y_coord * y_coord).sqrt();
+        let theta = golden_ratio * i_f * std::f32::consts::TAU;
 
-            for pos in positions {
-                let y_pos = pos[1];
-                let lerp_factor = (y_pos - min_y) / (max_y - min_y);
-                let color_lerp_factor = lerp_factor.powf(3.0);
+        let direction = Vec3::new(theta.cos() * radius, y_coord, theta.sin() * radius).normalize();
+        directions.push(direction);
+        cooldowns.push(Timer::from_seconds(0.1, TimerMode::Once));
+    }
 
-                let base = config.orb_base_color;
-                let peak = config.orb_peak_color;
+    commands.insert_resource(OrbProjetileInfo { directions, cooldowns });
+}
 
-                let r = base.r() + (peak.r() - base.r()) * color_lerp_factor;
-                let g = base.g() + (peak.g() - base.g()) * color_lerp_factor;
-                let b = base.b() + (peak.b() - base.b()) * color_lerp_factor;
-                let a = base.a() + (peak.a() - base.a()) * color_lerp_factor;
+fn spawn_orb_projectiles(
+    mut commands: Commands,
+    time: Res<Time>,
+    config: Res<VisualsConfig>,
+    audio_analysis: Res<AudioAnalysis>,
+    mut projectile_info: ResMut<OrbProjetileInfo>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    if audio_analysis.frequency_bins.len() != config.num_bands {
+        return;
+    }
 
-                colors.push([r, g, b, a]);
-            }
-            arm_mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, colors);
-        }
+    // Si le nombre de bandes a changé, on doit recréer les directions/cooldowns
+    if config.num_bands != projectile_info.directions.len() {
+         let num_bands = config.num_bands;
+        let mut directions = Vec::with_capacity(num_bands);
+        let mut cooldowns = Vec::with_capacity(num_bands);
 
-        let (x, y, z) = {
+        for i in 0..num_bands {
             let golden_ratio = (1.0 + 5.0f32.sqrt()) / 2.0;
             let i_f = i as f32;
-            let n_f = num_arms as f32;
+            let n_f = num_bands as f32;
             let y_coord = 1.0 - (2.0 * i_f) / (n_f - 1.0);
             let radius = (1.0 - y_coord * y_coord).sqrt();
             let theta = golden_ratio * i_f * std::f32::consts::TAU;
-            (theta.cos() * radius, y_coord, theta.sin() * radius)
-        };
 
-        let direction = Vec3::new(x, y, z).normalize();
+            let direction = Vec3::new(theta.cos() * radius, y_coord, theta.sin() * radius).normalize();
+            directions.push(direction);
+            cooldowns.push(Timer::from_seconds(0.1, TimerMode::Once));
+        }
+        projectile_info.directions = directions;
+        projectile_info.cooldowns = cooldowns;
+    }
 
-        let rotation = Quat::from_rotation_arc(Vec3::Y, direction);
-        let translation = direction * 1.0;
-        let transform = Transform {
-            translation,
-            rotation,
-            scale: Vec3::new(1.0, 0.01, 1.0),
-        };
 
-        commands.spawn((
-            PbrBundle {
-                mesh: meshes.add(arm_mesh),
-                material: arm_material.clone(),
-                transform,
-                ..default()
-            },
-            OrbArm { band: i },
-            OrbVisual,
-        ));
+    // On tick tous les cooldowns
+    for timer in projectile_info.cooldowns.iter_mut() {
+        timer.tick(time.delta());
+    }
+
+    // Crée une seule fois le mesh et le matériau pour les projectiles
+    let mut arm_mesh: Mesh = Capsule3d::new(0.2, 1.5).into();
+     if let Some(VertexAttributeValues::Float32x3(positions)) = arm_mesh.attribute(Mesh::ATTRIBUTE_POSITION) {
+        let mut colors = Vec::with_capacity(positions.len());
+        let min_y = positions.iter().map(|p| p[1]).reduce(f32::min).unwrap_or(-1.0);
+        let max_y = positions.iter().map(|p| p[1]).reduce(f32::max).unwrap_or(1.0);
+
+        for pos in positions {
+            let y_pos = pos[1];
+            let lerp_factor = (y_pos - min_y) / (max_y - min_y);
+            let color_lerp_factor = lerp_factor.powf(3.0);
+
+            let base = config.orb_base_color;
+            let peak = config.orb_peak_color;
+
+            let r = base.r() + (peak.r() - base.r()) * color_lerp_factor;
+            let g = base.g() + (peak.g() - base.g()) * color_lerp_factor;
+            let b = base.b() + (peak.b() - base.b()) * color_lerp_factor;
+            let a = base.a() + (peak.a() - base.a()) * color_lerp_factor;
+
+            colors.push([r, g, b, a]);
+        }
+        arm_mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, colors);
+    }
+    let mesh_handle = meshes.add(arm_mesh);
+    let material_handle = materials.add(StandardMaterial {
+        base_color: Color::WHITE,
+        emissive: config.orb_peak_color * 2.0, // Pour le bloom
+        ..default()
+    });
+
+
+    // On parcourt les bandes de fréquence
+    for i in 0..config.num_bands {
+        if let (Some(amplitude), Some(cooldown), Some(direction)) = (
+            audio_analysis.frequency_bins.get(i),
+            projectile_info.cooldowns.get_mut(i),
+            projectile_info.directions.get(i),
+        ) {
+            // Si le son est assez fort et que le cooldown est terminé
+            if *amplitude > config.orb_activation_threshold && cooldown.finished() {
+
+                let rotation = Quat::from_rotation_arc(Vec3::Y, *direction);
+                let transform = Transform::from_rotation(rotation)
+                                    .with_translation(*direction * 2.0); // Commence à la surface de l'orbe
+
+                commands.spawn((
+                    PbrBundle {
+                        mesh: mesh_handle.clone(),
+                        material: material_handle.clone(),
+                        transform,
+                        ..default()
+                    },
+                    OrbProjectile {
+                        direction: *direction,
+                        lifespan: Timer::from_seconds(config.orb_arm_lifespan, TimerMode::Once),
+                    },
+                    OrbVisual,
+                ));
+
+                // On réinitialise le cooldown
+                cooldown.reset();
+            }
+        }
     }
 }
 
-fn update_orb_arms(
-    audio_analysis: Res<AudioAnalysis>,
+fn move_and_cull_projectiles(
+    mut commands: Commands,
+    time: Res<Time>,
     config: Res<VisualsConfig>,
-    mut arm_query: Query<(&mut Transform, &OrbArm)>,
+    mut projectile_query: Query<(Entity, &mut Transform, &mut OrbProjectile)>,
 ) {
-    if audio_analysis.frequency_bins.len() != config.num_bands { return; }
+    for (entity, mut transform, mut projectile) in &mut projectile_query {
+        // On tick le timer de durée de vie
+        projectile.lifespan.tick(time.delta());
 
-    for (mut transform, arm) in arm_query.iter_mut() {
-        if let Some(amplitude) = audio_analysis.frequency_bins.get(arm.band) {
-            let target_scale_y = (amplitude.sqrt() * config.bass_sensitivity * 0.8).clamp(0.01, 4.0);
-
-            let smoothing_factor = config.orb_smoothing;
-            transform.scale.y = transform.scale.y + (target_scale_y - transform.scale.y) * smoothing_factor;
+        // Si le timer est fini, on supprime le projectile
+        if projectile.lifespan.finished() {
+            commands.entity(entity).despawn();
+        } else {
+            // Sinon, on le déplace
+            transform.translation += projectile.direction * config.orb_arm_speed * time.delta_seconds();
         }
     }
 }
@@ -189,10 +215,10 @@ fn update_orb_arms(
 fn despawn_orb_visuals(
     mut commands: Commands,
     query: Query<Entity, With<OrbVisual>>,
-    mut orb_state: ResMut<OrbState>,
 ) {
     for entity in &query {
         commands.entity(entity).despawn_recursive();
     }
-    *orb_state = OrbState::default();
+    // On retire la ressource pour éviter les soucis au prochain lancement
+    commands.remove_resource::<OrbProjetileInfo>();
 }

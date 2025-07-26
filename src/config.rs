@@ -17,13 +17,16 @@ pub struct VisualsConfig {
     pub viz3d_column_size: usize,
     pub orb_base_color: Color,
     pub orb_peak_color: Color,
-    pub orb_smoothing: f32,
+
+    pub orb_activation_threshold: f32,
+    pub orb_arm_lifespan: f32,
+    pub orb_arm_speed: f32,
 }
 
 impl Default for VisualsConfig {
     fn default() -> Self {
         Self {
-            bass_sensitivity: 4.0,
+            bass_sensitivity: 2.0,
             bloom_enabled: true,
             bloom_intensity: 0.3,
             bloom_threshold: 0.8,
@@ -36,7 +39,10 @@ impl Default for VisualsConfig {
             viz3d_column_size: 8,
             orb_base_color: Color::rgb(0.1, 0.1, 0.7),       // Deep Blue
             orb_peak_color: Color::rgb(1.0, 0.0, 1.0),       // Magenta
-            orb_smoothing: 0.1,
+
+            orb_activation_threshold: 0.1,
+            orb_arm_lifespan: 2.0, // Les bras vivent 2 secondes
+            orb_arm_speed: 5.0,    // Vitesse de déplacement
         }
     }
 }
