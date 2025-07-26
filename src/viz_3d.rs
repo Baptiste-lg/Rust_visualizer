@@ -40,6 +40,7 @@ fn setup_3d_visuals(
 
             let material = materials.add(StandardMaterial {
                 base_color: Color::rgb(0.8, 0.7, 0.6),
+                // MODIFIED: Set the initial emissive color to black.
                 emissive: Color::BLACK,
                 metallic: 1.0,
                 perceptual_roughness: 0.1,
@@ -59,7 +60,7 @@ fn setup_3d_visuals(
     }
 }
 
-// MODIFIED: The core logic now resides here. We check the config before making cubes glow.
+// MODIFIED: This function now calculates a much stronger emissive color to make the bloom pop.
 fn update_3d_visuals(
     audio_analysis: Res<AudioAnalysis>,
     config: Res<VisualsConfig>,
@@ -69,13 +70,15 @@ fn update_3d_visuals(
     let bass_height = 1.0 + audio_analysis.bass * config.bass_sensitivity;
     let smoothing_factor = 0.1;
 
-    // Determine the emissive color based on whether bloom is enabled in the config.
+    // We calculate the emissive color only if bloom is enabled.
     let emissive_color = if config.bloom_enabled {
-        let base_color = Color::rgb_u8(255, 60, 0); // Orange color
-        let strength = audio_analysis.bass * 5.0;  // HDR multiplier
-        base_color * strength
+        // Using a bright orange color as a base.
+        let base_color = Color::rgb(2.0, 0.5, 0.0);
+        // We multiply the color by the bass intensity to make it glow.
+        // The value can go above 1.0, which is necessary for HDR.
+        base_color * audio_analysis.bass * 10.0
     } else {
-        // If bloom is disabled, turn off the light source.
+        // If bloom is disabled, the cubes emit no light.
         Color::BLACK
     };
 
@@ -85,8 +88,8 @@ fn update_3d_visuals(
 
         transform.scale.y = current_scale + (target_scale - current_scale) * smoothing_factor;
 
-        // Apply the calculated emissive color to the material.
         if let Some(material) = materials.get_mut(material_handle) {
+            // We apply the new emissive color to the material of each cube.
             material.emissive = emissive_color;
         }
     }

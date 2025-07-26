@@ -3,7 +3,6 @@
 use bevy::{
     core_pipeline::{
         bloom::BloomSettings,
-        // REMOVED: Unused import for Tonemapping, fixing the warning.
         experimental::taa::TemporalAntiAliasBundle
     },
     input::mouse::{MouseMotion, MouseWheel},
@@ -48,10 +47,16 @@ fn setup_3d_scene_and_camera(mut commands: Commands) {
     commands.spawn((
         Camera3dBundle {
             transform: initial_transform,
+            // MODIFIED: We now use more advanced bloom settings for a better visual effect.
+            camera: Camera {
+                hdr: true, // 1. HDR is required for bloom.
+                ..default()
+            },
             ..default()
         },
-        PanOrbitCamera::default(),
+        // 2. We initialize the bloom settings here.
         BloomSettings::default(),
+        PanOrbitCamera::default(),
         TemporalAntiAliasBundle::default(),
     ));
 
@@ -66,22 +71,38 @@ fn setup_3d_scene_and_camera(mut commands: Commands) {
     });
 }
 
+// MODIFIED: This system now cleanly enables/disables bloom and applies settings from the UI.
 fn update_bloom_settings(
     config: Res<VisualsConfig>,
-    mut camera_query: Query<&mut BloomSettings, With<Camera>>,
+    mut camera_query: Query<(Entity, Option<&mut BloomSettings>), With<Camera>>,
+    mut commands: Commands,
 ) {
-    // MODIFIED: Removed the `if config.is_changed()` guard.
-    // This system now runs every frame to ensure our UI settings are always applied,
-    // overriding any defaults from the render pipeline.
-    for mut bloom in camera_query.iter_mut() {
-        if config.bloom_enabled {
-            bloom.intensity = config.bloom_intensity;
-            bloom.prefilter_settings.threshold = config.bloom_threshold;
-        } else {
-            bloom.intensity = 0.0;
+    let (camera_entity, bloom_settings) = camera_query.single_mut();
+
+    if config.bloom_enabled {
+        match bloom_settings {
+            // If bloom is enabled and the component exists, we update it.
+            Some(mut settings) => {
+                settings.intensity = config.bloom_intensity;
+                settings.low_frequency_boost = 0.7;
+                settings.low_frequency_boost_curvature = 0.95;
+                settings.high_pass_frequency = 0.85;
+                settings.prefilter_settings.threshold = config.bloom_threshold;
+                settings.prefilter_settings.threshold_softness = 0.6;
+            }
+            // If bloom is enabled but the component is missing, we add it.
+            None => {
+                commands.entity(camera_entity).insert(BloomSettings::default());
+            }
+        }
+    } else {
+        // If bloom is disabled and the component exists, we remove it.
+        if bloom_settings.is_some() {
+            commands.entity(camera_entity).remove::<BloomSettings>();
         }
     }
 }
+
 
 fn pan_orbit_camera(
     primary_window: Query<&Window, With<PrimaryWindow>>,
