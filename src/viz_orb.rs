@@ -102,8 +102,7 @@ fn spawn_orb_entities(
                 metallic: 0.2,
                 ..default()
             }),
-            // MODIFIED: The central orb is now even smaller.
-            transform: Transform::from_scale(Vec3::splat(2.0)),
+            transform: Transform::from_scale(Vec3::splat(3.0)),
             ..default()
         },
         OrbVisual,
@@ -149,7 +148,7 @@ fn spawn_orb_entities(
         let direction = Vec3::new(x, y, z).normalize();
 
         let rotation = Quat::from_rotation_arc(Vec3::Y, direction);
-        let translation = direction * 1.0; // Start the arm at the surface of the smaller orb.
+        let translation = direction * 1.0;
         let transform = Transform {
             translation,
             rotation,
@@ -180,9 +179,7 @@ fn update_orb_arms(
         if let Some(amplitude) = audio_analysis.frequency_bins.get(arm.band) {
             let target_scale_y = (amplitude.sqrt() * config.bass_sensitivity * 0.8).clamp(0.01, 4.0);
 
-            // MODIFIED: This value is now higher, which means less smoothing.
-            // The arms will snap to their target length more quickly.
-            let smoothing_factor = 0.4;
+            let smoothing_factor = config.orb_smoothing;
             transform.scale.y = transform.scale.y + (target_scale_y - transform.scale.y) * smoothing_factor;
         }
     }

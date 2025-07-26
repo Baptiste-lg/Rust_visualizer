@@ -14,8 +14,10 @@ pub struct VisualsConfig {
     pub viz2d_inactive_color: Color,
     pub viz2d_active_color: Color,
     pub viz3d_base_color: Color,
+    pub viz3d_column_size: usize,
     pub orb_base_color: Color,
     pub orb_peak_color: Color,
+    pub orb_smoothing: f32,
 }
 
 impl Default for VisualsConfig {
@@ -26,13 +28,15 @@ impl Default for VisualsConfig {
             bloom_intensity: 0.3,
             bloom_threshold: 0.8,
             bloom_color: Color::rgb(1.0, 0.2, 0.0),
-            num_bands: 6,
+            num_bands: 8,
             spread_enabled: true,
             viz2d_inactive_color: Color::rgb(0.2, 0.2, 0.8), // Dark Blue
             viz2d_active_color: Color::rgb(1.0, 0.3, 0.9),   // Bright Pink
             viz3d_base_color: Color::rgb(0.8, 0.7, 0.6),     // Default Beige
+            viz3d_column_size: 8,
             orb_base_color: Color::rgb(0.1, 0.1, 0.7),       // Deep Blue
             orb_peak_color: Color::rgb(1.0, 0.0, 1.0),       // Magenta
+            orb_smoothing: 0.1,
         }
     }
 }

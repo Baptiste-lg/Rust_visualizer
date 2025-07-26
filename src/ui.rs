@@ -153,7 +153,7 @@ fn visualizer_ui_system(
         ui.add(egui::Slider::new(&mut config.num_bands, 4..=32).logarithmic(true));
 
         ui.label("Amplitude Sensitivity");
-        ui.add(egui::Slider::new(&mut config.bass_sensitivity, 0.0..=20.0));
+        ui.add(egui::Slider::new(&mut config.bass_sensitivity, 0.0..=4.0));
 
         if *app_state.get() == AppState::Visualization2D {
             ui.separator();
@@ -173,6 +173,10 @@ fn visualizer_ui_system(
         if *app_state.get() == AppState::Visualization3D {
             ui.separator();
             ui.checkbox(&mut config.spread_enabled, "Enable Cube Spread");
+
+            ui.label("Cubes per Column");
+            ui.add(egui::Slider::new(&mut config.viz3d_column_size, 1..=32));
+
 
             ui.label("Base Color");
             let mut color_temp_base = [config.viz3d_base_color.r(), config.viz3d_base_color.g(), config.viz3d_base_color.b()];
@@ -197,7 +201,6 @@ fn visualizer_ui_system(
             }
         }
 
-        // MODIFIED: Added specific controls for the orb visualizer.
         if *app_state.get() == AppState::VisualizationOrb {
             ui.separator();
             ui.label("Base Color");
@@ -211,6 +214,9 @@ fn visualizer_ui_system(
             if color_picker::color_edit_button_rgb(ui, &mut color_temp_peak).changed() {
                 config.orb_peak_color = Color::rgb(color_temp_peak[0], color_temp_peak[1], color_temp_peak[2]);
             }
+
+            ui.label("Arm Smoothing");
+            ui.add(egui::Slider::new(&mut config.orb_smoothing, 0.01..=0.5));
         }
 
         ui.separator();
