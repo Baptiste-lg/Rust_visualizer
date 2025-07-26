@@ -141,7 +141,6 @@ fn mic_selection_interaction(
     }
 }
 
-// MODIFIED: Added a slider for the number of frequency bands.
 fn visualizer_ui_system(
     mut contexts: EguiContexts,
     mut config: ResMut<VisualsConfig>,
@@ -149,14 +148,16 @@ fn visualizer_ui_system(
     mut viz_enabled: ResMut<VisualizationEnabled>,
 ) {
     egui::Window::new("Controls").show(contexts.ctx_mut(), |ui| {
-        // We use a logarithmic slider for a more intuitive feel.
         ui.label("Number of Bands");
         ui.add(egui::Slider::new(&mut config.num_bands, 4..=32).logarithmic(true));
 
-        ui.separator();
-
-        ui.label("Bass Sensitivity");
+        // MODIFIED: Renamed "Bass Sensitivity" to "Amplitude Sensitivity"
+        ui.label("Amplitude Sensitivity");
+        // NOTE: We're still using the `bass_sensitivity` field, just changing the label.
         ui.add(egui::Slider::new(&mut config.bass_sensitivity, 0.0..=20.0));
+
+        // ADDED: Checkbox to control the spread effect.
+        ui.checkbox(&mut config.spread_enabled, "Enable Cube Spread");
 
         ui.separator();
 

@@ -5,18 +5,29 @@ use crate::{AppState, audio::AudioAnalysis, config::VisualsConfig, Visualization
 
 pub struct Viz3DPlugin;
 
+/// A local resource to keep track of the state of our voxel grid.
+/// This helps us know when we need to respawn the cubes.
+#[derive(Resource, Default)]
+struct VoxelGridState {
+    num_bands: usize,
+}
+
 impl Plugin for Viz3DPlugin {
     fn build(&self, app: &mut App) {
         app
-            .add_systems(OnEnter(AppState::Visualization3D), spawn_visuals)
+            // We introduce a local resource to manage the state.
+            .init_resource::<VoxelGridState>()
+            // We remove all previous cube-spawning logic and replace it with this single system.
             .add_systems(Update, (
-                update_3d_visuals,
-                // MODIFIED: Corrected the run_if condition. No extra parentheses needed.
-                respawn_visuals_on_change.run_if(resource_changed::<VisualsConfig>),
+                manage_voxel_grid,
+                // We ensure the animation runs *after* the grid has been potentially updated.
+                update_3d_visuals.after(manage_voxel_grid),
             )
                 .run_if(in_state(AppState::Visualization3D))
                 .run_if(|viz_enabled: Res<VisualizationEnabled>| viz_enabled.0)
-            );
+            )
+            // Add a system to clean up when we exit the 3D visualization state.
+            .add_systems(OnExit(AppState::Visualization3D), (despawn_visuals, |mut state: ResMut<VoxelGridState>| *state = VoxelGridState::default()));
     }
 }
 
@@ -26,6 +37,30 @@ struct VisualizerCube {
     frequency_band: usize,
 }
 
+/// This is our new "master" system for the grid.
+/// It checks if the grid is out of sync with the config and rebuilds it if necessary.
+fn manage_voxel_grid(
+    mut commands: Commands,
+    config: Res<VisualsConfig>,
+    mut grid_state: ResMut<VoxelGridState>,
+    // These are needed to spawn new cubes
+    meshes: ResMut<Assets<Mesh>>,
+    materials: ResMut<Assets<StandardMaterial>>,
+    // We need this to know which cubes to despawn
+    cube_query: Query<Entity, With<VisualizerCube>>,
+) {
+    // If the number of bands in the config is different from our current grid state...
+    if config.num_bands != grid_state.num_bands {
+        // 1. Despawn all existing cubes.
+        despawn_visuals(commands.reborrow(), cube_query);
+        // 2. Spawn a new grid with the correct number of cubes.
+        spawn_visuals(commands.reborrow(), meshes, materials, &config);
+        // 3. Update our state to match the new grid.
+        grid_state.num_bands = config.num_bands;
+    }
+}
+
+/// A helper function to despawn all cubes.
 fn despawn_visuals(
     mut commands: Commands,
     cube_query: Query<Entity, With<VisualizerCube>>
@@ -35,13 +70,13 @@ fn despawn_visuals(
     }
 }
 
+/// A helper function to spawn a grid of cubes based on the current config.
 fn spawn_visuals(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
-    config: Res<VisualsConfig>,
+    config: &VisualsConfig,
 ) {
-
     let cube_mesh = meshes.add(Cuboid::new(1.0, 1.0, 1.0));
     let cube_spacing = 1.5;
     let grid_size = config.num_bands;
@@ -63,7 +98,7 @@ fn spawn_visuals(
             commands.spawn((
                 PbrBundle {
                     mesh: cube_mesh.clone(),
-                    material: material,
+                    material: material.clone(),
                     transform: Transform::from_translation(initial_pos),
                     ..default()
                 },
@@ -76,19 +111,7 @@ fn spawn_visuals(
     }
 }
 
-fn respawn_visuals_on_change(
-    mut commands: Commands,
-    cube_query: Query<Entity, With<VisualizerCube>>,
-    meshes: ResMut<Assets<Mesh>>,
-    materials: ResMut<Assets<StandardMaterial>>,
-    config: Res<VisualsConfig>,
-) {
-    // This system only runs when the config has changed, so we can directly respawn.
-    despawn_visuals(commands.reborrow(), cube_query);
-    spawn_visuals(commands, meshes, materials, config);
-}
-
-
+/// The animation system remains largely the same.
 fn update_3d_visuals(
     audio_analysis: Res<AudioAnalysis>,
     config: Res<VisualsConfig>,
@@ -99,17 +122,21 @@ fn update_3d_visuals(
         return;
     }
 
-    let spread_factor = 1.0 + (audio_analysis.treble_average * 0.1).min(1.5);
     let smoothing_factor = 0.2;
 
     for (mut transform, material_handle, cube) in &mut query {
         if let Some(band_amplitude) = audio_analysis.frequency_bins.get(cube.frequency_band) {
-            // Using bass_sensitivity here as a general "amplitude sensitivity"
             let target_scale = 1.0 + band_amplitude * config.bass_sensitivity;
             transform.scale.y = transform.scale.y + (target_scale - transform.scale.y) * smoothing_factor;
 
-            transform.translation.x = cube.initial_position.x * spread_factor;
-            transform.translation.z = cube.initial_position.z * spread_factor;
+            if config.spread_enabled {
+                let spread_factor = 1.0 + (audio_analysis.treble_average * 0.1).min(1.5);
+                transform.translation.x = cube.initial_position.x * spread_factor;
+                transform.translation.z = cube.initial_position.z * spread_factor;
+            } else {
+                transform.translation.x = cube.initial_position.x;
+                transform.translation.z = cube.initial_position.z;
+            }
 
             let emissive_color = if config.bloom_enabled {
                 let glow_intensity = (transform.scale.y - 1.0).max(0.0);

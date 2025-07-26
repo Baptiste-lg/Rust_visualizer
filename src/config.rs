@@ -10,6 +10,7 @@ pub struct VisualsConfig {
     pub bloom_threshold: f32,
     pub bloom_color: Color,
     pub num_bands: usize,
+    pub spread_enabled: bool,
 }
 
 impl Default for VisualsConfig {
@@ -20,7 +21,8 @@ impl Default for VisualsConfig {
             bloom_intensity: 0.3,
             bloom_threshold: 0.8,
             bloom_color: Color::rgb(1.0, 0.2, 0.0),
-            num_bands: 5,
+            num_bands: 6,
+            spread_enabled: true,
         }
     }
 }
