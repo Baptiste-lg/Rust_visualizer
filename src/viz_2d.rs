@@ -119,9 +119,6 @@ fn update_2d_visuals(
 
             transform.translation.y = new_height / 2.0 - 25.0;
 
-            // ====================================================================
-            // === FIXED COLOR INTERPOLATION FOR BEVY COMPATIBILITY ===
-            // ====================================================================
             // Simple color mixing approach that works across Bevy versions
             let color_intensity = (new_height / 800.0).clamp(0.0, 1.0);
 
