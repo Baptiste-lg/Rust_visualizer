@@ -3,7 +3,8 @@
 use bevy::prelude::*;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use rodio::{Decoder, Sink, source::Source};
-use spectrum_analyzer::{samples_fft_to_spectrum, scaling::divide_by_N_sqrt, windows::hann_window, FrequencyLimit, FrequencySpectrum};
+// MODIFIED: Removed FrequencySpectrum as it was unused.
+use spectrum_analyzer::{samples_fft_to_spectrum, scaling::divide_by_N_sqrt, windows::hann_window, FrequencyLimit};
 use std::io::Cursor;
 use std::sync::mpsc::{Receiver, Sender};
 use crate::{AppState, VisualizationEnabled, config::VisualsConfig};
@@ -115,7 +116,6 @@ pub struct AudioSamples(pub VecDeque<f32>);
 #[derive(Resource)]
 pub struct AudioInfo { pub sample_rate: u32 }
 
-// MODIFIED: Removed beat and bpm. Added previous_spectrum for flux calculation.
 #[derive(Resource, Default)]
 pub struct AudioAnalysis {
     // --- Frequency Data ---
@@ -215,7 +215,6 @@ pub fn read_mic_data_system(receiver: Option<NonSend<MicAudioReceiver>>, mut buf
     }
 }
 
-// MODIFIED: This function now calculates the new audio metrics.
 pub fn audio_analysis_system(
     time: Res<Time>,
     mut analysis_timer: ResMut<AnalysisTimer>,

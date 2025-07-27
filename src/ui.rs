@@ -28,7 +28,7 @@ impl Plugin for UiPlugin {
                     audio_details_panel_system,
                 )
                     .after(EguiSet::InitContexts)
-                    .run_if(|q: Query<Entity, With<PrimaryWindow>>| !q.is_empty())
+                    // The run_if on the group is good, but we add an internal check for extra safety on shutdown.
                     .run_if(in_state(AppState::Visualization2D)
                         .or_else(in_state(AppState::Visualization3D))
                         .or_else(in_state(AppState::VisualizationOrb)))
@@ -142,6 +142,7 @@ fn mic_selection_interaction(
     }
 }
 
+// MODIFIED: Added a query for the primary window to prevent panics on exit.
 fn visualizer_ui_system(
     mut contexts: EguiContexts,
     mut config: ResMut<VisualsConfig>,
@@ -150,10 +151,17 @@ fn visualizer_ui_system(
     app_state: Res<State<AppState>>,
     mut next_app_state: ResMut<NextState<AppState>>,
     mut active_viz: ResMut<ActiveVisualization>,
+    q_windows: Query<Entity, With<PrimaryWindow>>,
 ) {
-    let current_state = app_state.get();
+    // This check ensures the system doesn't run if the primary window is already gone.
+    if q_windows.get_single().is_err() {
+        return;
+    }
 
-    egui::Window::new("Controls").show(contexts.ctx_mut(), |ui| {
+    let current_state = app_state.get();
+    let ctx = contexts.ctx_mut();
+
+    egui::Window::new("Controls").show(ctx, |ui| {
         ui.heading("General");
 
         ui.checkbox(&mut config.details_panel_enabled, "Show Details Panel");
@@ -230,7 +238,7 @@ fn visualizer_ui_system(
     // --- Bloom Window (Only in 3D views) ---
 
     if *current_state == AppState::Visualization3D || *current_state == AppState::VisualizationOrb {
-        egui::Window::new("Bloom Settings").show(contexts.ctx_mut(), |ui| {
+        egui::Window::new("Bloom Settings").show(ctx, |ui| {
             ui.checkbox(&mut config.bloom_enabled, "Enable Bloom");
             if config.bloom_enabled {
                 ui.label("Intensity");
@@ -249,7 +257,7 @@ fn visualizer_ui_system(
     }
 
 
-    egui::Window::new("Audio Source").show(contexts.ctx_mut(), |ui| {
+    egui::Window::new("Audio Source").show(ctx, |ui| {
         ui.label(format!("Current Source: {:?}", selected_source.0));
         ui.separator();
 
@@ -267,7 +275,7 @@ fn visualizer_ui_system(
         }
     });
 
-    egui::Window::new("Visualizers").show(contexts.ctx_mut(), |ui| {
+    egui::Window::new("Visualizers").show(ctx, |ui| {
         ui.label("Select a visualizer:");
         ui.separator();
 
@@ -286,12 +294,18 @@ fn visualizer_ui_system(
     });
 }
 
-// MODIFIED: Removed Beat and BPM from the display.
+// MODIFIED: Added a query for the primary window to prevent panics on exit.
 fn audio_details_panel_system(
     mut contexts: EguiContexts,
     config: Res<VisualsConfig>,
     audio_analysis: Res<AudioAnalysis>,
+    q_windows: Query<Entity, With<PrimaryWindow>>,
 ) {
+    // This check ensures the system doesn't run if the primary window is already gone.
+    if q_windows.get_single().is_err() {
+        return;
+    }
+
     if !config.details_panel_enabled {
         return;
     }
