@@ -8,6 +8,7 @@ mod viz_3d;
 mod viz_orb;
 mod config;
 mod camera;
+mod viz_disc;
 
 // --- Plugin Imports ---
 use crate::config::VisualsConfig;
@@ -20,6 +21,8 @@ use viz_2d::Viz2DPlugin;
 use viz_3d::Viz3DPlugin;
 use viz_orb::VizOrbPlugin;
 use camera::CameraPlugin;
+// ADDED: Import the new plugin
+use viz_disc::VizDiscPlugin;
 
 #[derive(States, Debug, Clone, PartialEq, Eq, Hash, Default)]
 pub enum AppState {
@@ -29,19 +32,18 @@ pub enum AppState {
     Visualization3D,
     Visualization2D,
     VisualizationOrb,
+    // ADDED: New state for the disc visualizer
+    VisualizationDisc,
 }
 
-// ADDED: This resource will store the last active visualization state.
 #[derive(Resource, Debug, Clone)]
 pub struct ActiveVisualization(pub AppState);
 
 impl Default for ActiveVisualization {
     fn default() -> Self {
-        // The 3D cube visualizer will be the default when the app starts.
         Self(AppState::Visualization3D)
     }
 }
-
 
 #[derive(Resource, Debug)]
 pub struct VisualizationEnabled(pub bool);
@@ -51,7 +53,6 @@ impl Default for VisualizationEnabled {
         Self(true)
     }
 }
-
 
 fn main() {
     let mut app = App::new();
@@ -66,7 +67,7 @@ fn main() {
         .init_resource::<VisualsConfig>()
         .init_resource::<SelectedAudioSource>()
         .init_resource::<VisualizationEnabled>()
-        .init_resource::<ActiveVisualization>() // ADDED: Initialize the new resource
+        .init_resource::<ActiveVisualization>()
         .init_state::<AppState>()
         .add_plugins((
             EguiPlugin,
@@ -76,6 +77,7 @@ fn main() {
             Viz3DPlugin,
             VizOrbPlugin,
             CameraPlugin,
+            VizDiscPlugin,
         ))
         .run();
 }
