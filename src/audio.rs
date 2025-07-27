@@ -3,10 +3,9 @@
 use bevy::prelude::*;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use rodio::{Decoder, Sink, source::Source};
-use spectrum_analyzer::{samples_fft_to_spectrum, scaling::divide_by_N_sqrt, windows::hann_window, FrequencyLimit};
+use spectrum_analyzer::{samples_fft_to_spectrum, scaling::divide_by_N_sqrt, windows::hann_window, FrequencyLimit, FrequencySpectrum};
 use std::io::Cursor;
 use std::sync::mpsc::{Receiver, Sender};
-// REMOVED: ActiveVisualization was not used in this file.
 use crate::{AppState, VisualizationEnabled, config::VisualsConfig};
 use std::path::PathBuf;
 use std::time::Duration;
@@ -87,7 +86,6 @@ impl Plugin for AudioPlugin {
 }
 
 
-// MODIFIED: This enum and its variants must be public to be used in other modules.
 #[derive(Resource, Debug, Clone, PartialEq, Eq, Default)]
 pub enum AudioSource {
     File(PathBuf),
@@ -117,10 +115,26 @@ pub struct AudioSamples(pub VecDeque<f32>);
 #[derive(Resource)]
 pub struct AudioInfo { pub sample_rate: u32 }
 
+// MODIFIED: Removed beat and bpm. Added previous_spectrum for flux calculation.
 #[derive(Resource, Default)]
 pub struct AudioAnalysis {
+    // --- Frequency Data ---
     pub frequency_bins: Vec<f32>,
+    pub bass: f32,
+    pub mid: f32,
+    pub treble: f32,
     pub treble_average: f32,
+    pub previous_spectrum: Vec<(f32, f32)>,
+
+
+    // --- Basic Metrics ---
+    pub volume: f32,
+    pub energy: f32,
+
+    // --- Spectral Features ---
+    pub centroid: f32,
+    pub flux: f32,
+    pub rolloff: f32,
 }
 
 pub fn manage_audio_playback(
@@ -201,6 +215,7 @@ pub fn read_mic_data_system(receiver: Option<NonSend<MicAudioReceiver>>, mut buf
     }
 }
 
+// MODIFIED: This function now calculates the new audio metrics.
 pub fn audio_analysis_system(
     time: Res<Time>,
     mut analysis_timer: ResMut<AnalysisTimer>,
@@ -221,9 +236,7 @@ pub fn audio_analysis_system(
 
     let analysis_buffer: Option<Vec<f32>> = match &audio_source.0 {
         AudioSource::File(_) => {
-            if audio_samples.0.len() < fft_size {
-                None
-            } else {
+            if audio_samples.0.len() < fft_size { None } else {
                 let buffer_len = audio_samples.0.len();
                 let analysis_vec = audio_samples.0.iter().copied().take(fft_size).collect();
                 let drain_amount = buffer_len.saturating_sub(fft_size / 2);
@@ -232,9 +245,7 @@ pub fn audio_analysis_system(
             }
         },
         AudioSource::Microphone => {
-            if mic_buffer.0.len() < fft_size {
-                None
-            } else {
+            if mic_buffer.0.len() < fft_size { None } else {
                 let buffer_len = mic_buffer.0.len();
                 let analysis_vec = mic_buffer.0.iter().copied().take(fft_size).collect();
                 let drain_amount = buffer_len.saturating_sub(fft_size / 2);
@@ -255,9 +266,50 @@ pub fn audio_analysis_system(
         Some(&divide_by_N_sqrt),
     ).expect("Failed to compute spectrum");
 
+
+    // --- START of new calculations ---
+
+    // 1. Volume (RMS) and Energy
+    let squared_sum = samples_slice.iter().map(|s| s * s).sum::<f32>();
+    audio_analysis.volume = (squared_sum / samples_slice.len() as f32).sqrt();
+    audio_analysis.energy = squared_sum;
+
+    let spectrum_data: Vec<(f32, f32)> = spectrum.data().iter().map(|(f, v)| (f.val(), v.val())).collect();
+    let total_magnitude = spectrum_data.iter().map(|&(_, mag)| mag).sum::<f32>();
+
+    if total_magnitude > 0.0 {
+        // 2. Spectral Centroid (Brightness)
+        let weighted_freq_sum = spectrum_data.iter().map(|&(freq, mag)| freq * mag).sum::<f32>();
+        audio_analysis.centroid = weighted_freq_sum / total_magnitude;
+
+        // 3. Spectral Rolloff
+        let rolloff_threshold = total_magnitude * 0.85;
+        let mut cumulative_magnitude = 0.0;
+        for &(freq, mag) in &spectrum_data {
+            cumulative_magnitude += mag;
+            if cumulative_magnitude >= rolloff_threshold {
+                audio_analysis.rolloff = freq;
+                break;
+            }
+        }
+
+        // 4. Spectral Flux
+        if !audio_analysis.previous_spectrum.is_empty() && audio_analysis.previous_spectrum.len() == spectrum_data.len() {
+            let sum_of_squared_diffs = spectrum_data.iter().zip(&audio_analysis.previous_spectrum)
+                .map(|((_, cur_mag), (_, prev_mag))| (cur_mag - prev_mag).powi(2))
+                .sum::<f32>();
+            audio_analysis.flux = sum_of_squared_diffs.sqrt();
+        } else {
+            audio_analysis.flux = 0.0;
+        }
+    }
+    audio_analysis.previous_spectrum = spectrum_data.clone();
+
+    // --- END of new calculations ---
+
+
     let num_bands = config.num_bands;
     let mut new_bins = vec![0.0; num_bands];
-
     let min_freq = 20.0f32;
     let max_freq = 20000.0f32;
     let band_limits: Vec<f32> = (0..num_bands).map(|i| {
@@ -287,4 +339,8 @@ pub fn audio_analysis_system(
         audio_analysis.frequency_bins[i] = audio_analysis.frequency_bins[i] * smoothing + new_bins[i] * (1.0 - smoothing);
     }
     audio_analysis.treble_average = audio_analysis.treble_average * smoothing + treble_val * (1.0 - smoothing);
+
+    audio_analysis.bass = audio_analysis.frequency_bins.iter().take(num_bands / 4).sum();
+    audio_analysis.mid = audio_analysis.frequency_bins.iter().skip(num_bands / 4).take(num_bands / 2).sum();
+    audio_analysis.treble = audio_analysis.frequency_bins.iter().skip(3 * num_bands / 4).sum();
 }
