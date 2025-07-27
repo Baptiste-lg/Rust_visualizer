@@ -7,7 +7,6 @@ pub struct VisualsConfig {
     // --- General Settings ---
     pub bass_sensitivity: f32,
     pub num_bands: usize,
-    // ADDED: A flag to control the visibility of the details panel
     pub details_panel_enabled: bool,
 
     // --- Bloom Settings ---
@@ -31,6 +30,15 @@ pub struct VisualsConfig {
     pub orb_noise_speed: f32,
     pub orb_noise_frequency: f32,
     pub orb_treble_influence: f32,
+
+    // ADDED: Disc Visualizer Settings
+    pub disc_color: Color,
+    pub disc_radius: f32,
+    pub disc_line_thickness: f32,
+    pub disc_iterations: i32,
+    pub disc_speed: f32,
+    pub disc_center_radius_factor: f32,
+
 }
 
 impl Default for VisualsConfig {
@@ -39,7 +47,6 @@ impl Default for VisualsConfig {
             // --- General ---
             bass_sensitivity: 4.0,
             num_bands: 16,
-            // ADDED: The panel will be disabled by default
             details_panel_enabled: false,
 
             // --- Bloom ---
@@ -63,6 +70,14 @@ impl Default for VisualsConfig {
             orb_noise_speed: 1.0,
             orb_noise_frequency: 2.0,
             orb_treble_influence: 0.3,
+
+            // ADDED: Disc Visualizer Defaults
+            disc_color: Color::rgb(1.0, 0.8, 0.2),
+            disc_radius: 0.8,
+            disc_line_thickness: 0.07,
+            disc_iterations: 35,
+            disc_speed: 1.0,
+            disc_center_radius_factor: 1.0,
         }
     }
 }
