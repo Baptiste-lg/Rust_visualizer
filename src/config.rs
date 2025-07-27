@@ -4,26 +4,28 @@ use bevy::prelude::*;
 
 #[derive(Resource, Clone)]
 pub struct VisualsConfig {
-    // --- Paramètres Généraux ---
+    // --- General Settings ---
     pub bass_sensitivity: f32,
     pub num_bands: usize,
+    // ADDED: A flag to control the visibility of the details panel
+    pub details_panel_enabled: bool,
 
-    // --- Paramètres du Bloom ---
+    // --- Bloom Settings ---
     pub bloom_enabled: bool,
     pub bloom_intensity: f32,
     pub bloom_threshold: f32,
     pub bloom_color: Color,
 
-    // --- Visualiseur 2D ---
+    // --- 2D Visualizer ---
     pub viz2d_inactive_color: Color,
     pub viz2d_active_color: Color,
 
-    // --- Visualiseur 3D ---
+    // --- 3D Visualizer ---
     pub spread_enabled: bool,
     pub viz3d_base_color: Color,
     pub viz3d_column_size: usize,
 
-    // --- Visualiseur Orbe ---
+    // --- Orb Visualizer ---
     pub orb_base_color: Color,
     pub orb_peak_color: Color,
     pub orb_noise_speed: f32,
@@ -34,9 +36,11 @@ pub struct VisualsConfig {
 impl Default for VisualsConfig {
     fn default() -> Self {
         Self {
-            // --- Généraux ---
+            // --- General ---
             bass_sensitivity: 4.0,
             num_bands: 16,
+            // ADDED: The panel will be disabled by default
+            details_panel_enabled: false,
 
             // --- Bloom ---
             bloom_enabled: true,
@@ -53,7 +57,7 @@ impl Default for VisualsConfig {
             viz3d_base_color: Color::rgb(0.8, 0.7, 0.6),
             viz3d_column_size: 8,
 
-            // --- Orbe ---
+            // --- Orb ---
             orb_base_color: Color::rgb(0.1, 0.1, 0.7),
             orb_peak_color: Color::rgb(1.0, 0.0, 1.0),
             orb_noise_speed: 1.0,
