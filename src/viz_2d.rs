@@ -38,9 +38,7 @@ fn setup_2d_scene(mut commands: Commands) {
     commands.spawn((
         SpatialBundle::default(),
         Viz2DScene,
-    )).with_children(|parent| {
-        parent.spawn(Camera2dBundle::default());
-    });
+    ));
 }
 
 fn despawn_scene(mut commands: Commands, scene_query: Query<Entity, With<Viz2DScene>>) {
@@ -119,14 +117,11 @@ fn update_2d_visuals(
 
             transform.translation.y = new_height / 2.0 - 25.0;
 
-            // Simple color mixing approach that works across Bevy versions
+            // CORRECTED LOGIC: Reverted to manual color interpolation
             let color_intensity = (new_height / 800.0).clamp(0.0, 1.0);
-
-            // Extract RGBA components from both colors
             let inactive = config.viz2d_inactive_color;
             let active = config.viz2d_active_color;
 
-            // Manual linear interpolation of RGBA components
             let r = inactive.r() + (active.r() - inactive.r()) * color_intensity;
             let g = inactive.g() + (active.g() - inactive.g()) * color_intensity;
             let b = inactive.b() + (active.b() - inactive.b()) * color_intensity;
