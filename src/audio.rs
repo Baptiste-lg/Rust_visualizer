@@ -3,7 +3,6 @@
 use bevy::prelude::*;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use rodio::{Decoder, Sink, source::Source};
-// MODIFIED: Removed FrequencySpectrum as it was unused.
 use spectrum_analyzer::{samples_fft_to_spectrum, scaling::divide_by_N_sqrt, windows::hann_window, FrequencyLimit};
 use std::io::Cursor;
 use std::sync::mpsc::{Receiver, Sender};
@@ -12,7 +11,6 @@ use std::path::PathBuf;
 use std::time::Duration;
 use std::collections::VecDeque;
 
-// This struct doesn't need to be public
 struct AudioDataTee<S> {
     source: S,
     sender: Sender<f32>,
@@ -44,7 +42,6 @@ where
 
 pub struct AudioPlugin;
 
-// Made public so it can be used in the App build
 #[derive(Resource)]
 pub struct AnalysisTimer(pub Timer);
 
@@ -79,9 +76,11 @@ impl Plugin for AudioPlugin {
                         .after(manage_audio_playback)
                         .run_if(|viz_enabled: Res<VisualizationEnabled>| viz_enabled.0),
                 )
+                // MODIFIED: Added the disc state to the run condition. THIS IS THE KEY FIX.
                 .run_if(in_state(AppState::Visualization2D)
                     .or_else(in_state(AppState::Visualization3D))
-                    .or_else(in_state(AppState::VisualizationOrb)))
+                    .or_else(in_state(AppState::VisualizationOrb))
+                    .or_else(in_state(AppState::VisualizationDisc)))
             );
     }
 }
@@ -118,20 +117,14 @@ pub struct AudioInfo { pub sample_rate: u32 }
 
 #[derive(Resource, Default)]
 pub struct AudioAnalysis {
-    // --- Frequency Data ---
     pub frequency_bins: Vec<f32>,
     pub bass: f32,
     pub mid: f32,
     pub treble: f32,
     pub treble_average: f32,
     pub previous_spectrum: Vec<(f32, f32)>,
-
-
-    // --- Basic Metrics ---
     pub volume: f32,
     pub energy: f32,
-
-    // --- Spectral Features ---
     pub centroid: f32,
     pub flux: f32,
     pub rolloff: f32,
@@ -265,10 +258,6 @@ pub fn audio_analysis_system(
         Some(&divide_by_N_sqrt),
     ).expect("Failed to compute spectrum");
 
-
-    // --- START of new calculations ---
-
-    // 1. Volume (RMS) and Energy
     let squared_sum = samples_slice.iter().map(|s| s * s).sum::<f32>();
     audio_analysis.volume = (squared_sum / samples_slice.len() as f32).sqrt();
     audio_analysis.energy = squared_sum;
@@ -277,11 +266,9 @@ pub fn audio_analysis_system(
     let total_magnitude = spectrum_data.iter().map(|&(_, mag)| mag).sum::<f32>();
 
     if total_magnitude > 0.0 {
-        // 2. Spectral Centroid (Brightness)
         let weighted_freq_sum = spectrum_data.iter().map(|&(freq, mag)| freq * mag).sum::<f32>();
         audio_analysis.centroid = weighted_freq_sum / total_magnitude;
 
-        // 3. Spectral Rolloff
         let rolloff_threshold = total_magnitude * 0.85;
         let mut cumulative_magnitude = 0.0;
         for &(freq, mag) in &spectrum_data {
@@ -292,7 +279,6 @@ pub fn audio_analysis_system(
             }
         }
 
-        // 4. Spectral Flux
         if !audio_analysis.previous_spectrum.is_empty() && audio_analysis.previous_spectrum.len() == spectrum_data.len() {
             let sum_of_squared_diffs = spectrum_data.iter().zip(&audio_analysis.previous_spectrum)
                 .map(|((_, cur_mag), (_, prev_mag))| (cur_mag - prev_mag).powi(2))
@@ -303,9 +289,6 @@ pub fn audio_analysis_system(
         }
     }
     audio_analysis.previous_spectrum = spectrum_data.clone();
-
-    // --- END of new calculations ---
-
 
     let num_bands = config.num_bands;
     let mut new_bins = vec![0.0; num_bands];
