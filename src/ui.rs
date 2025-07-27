@@ -3,7 +3,7 @@
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts, EguiSet};
 use bevy_egui::egui::color_picker;
-use crate::audio::{AudioSource, SelectedAudioSource, SelectedMic};
+use crate::audio::{AudioAnalysis, AudioSource, SelectedAudioSource, SelectedMic};
 use crate::config::VisualsConfig;
 use crate::{AppState, VisualizationEnabled, ActiveVisualization};
 use cpal::traits::{DeviceTrait, HostTrait};
@@ -23,7 +23,10 @@ impl Plugin for UiPlugin {
             .add_systems(OnExit(AppState::MicSelection), cleanup_menu)
             .add_systems(
                 Update,
-                visualizer_ui_system
+                (
+                    visualizer_ui_system,
+                    audio_details_panel_system,
+                )
                     .after(EguiSet::InitContexts)
                     .run_if(|q: Query<Entity, With<PrimaryWindow>>| !q.is_empty())
                     .run_if(in_state(AppState::Visualization2D)
@@ -152,18 +155,23 @@ fn visualizer_ui_system(
 
     egui::Window::new("Controls").show(contexts.ctx_mut(), |ui| {
         ui.heading("General");
+
+        ui.checkbox(&mut config.details_panel_enabled, "Show Details Panel");
+        ui.separator();
+
+
         ui.label("Number of Bands");
         ui.add(egui::Slider::new(&mut config.num_bands, 4..=32).logarithmic(true));
 
         ui.label("Amplitude Sensitivity");
         ui.add(egui::Slider::new(&mut config.bass_sensitivity, 0.0..=8.0));
 
-        // --- CONTRÔLES SPÉCIFIQUES ---
+        // --- Specific Controls ---
 
         if *current_state == AppState::Visualization2D {
             ui.separator();
             ui.heading("2D Bar Controls");
-            // ... (vous pouvez ajouter des contrôles pour la 2D ici si besoin)
+            // ... (you can add controls for 2D here if needed)
         }
 
         if *current_state == AppState::Visualization3D {
@@ -210,7 +218,7 @@ fn visualizer_ui_system(
             ui.add(egui::Slider::new(&mut config.orb_treble_influence, 0.0..=1.0));
         }
 
-        // --- CONTRÔLES GLOBAUX ---
+        // --- Global Controls ---
 
         ui.separator();
         let button_text = if viz_enabled.0 { "Deactivate Visualizer" } else { "Activate Visualizer" };
@@ -219,7 +227,7 @@ fn visualizer_ui_system(
         }
     });
 
-    // --- FENÊTRE POUR LE BLOOM (UNIQUEMENT DANS LES VUES 3D) ---
+    // --- Bloom Window (Only in 3D views) ---
 
     if *current_state == AppState::Visualization3D || *current_state == AppState::VisualizationOrb {
         egui::Window::new("Bloom Settings").show(contexts.ctx_mut(), |ui| {
@@ -277,6 +285,51 @@ fn visualizer_ui_system(
         }
     });
 }
+
+// MODIFIED: Removed Beat and BPM from the display.
+fn audio_details_panel_system(
+    mut contexts: EguiContexts,
+    config: Res<VisualsConfig>,
+    audio_analysis: Res<AudioAnalysis>,
+) {
+    if !config.details_panel_enabled {
+        return;
+    }
+
+    egui::Window::new("Audio Analysis Details")
+        .anchor(egui::Align2::LEFT_TOP, egui::vec2(10.0, 10.0))
+        .show(contexts.ctx_mut(), |ui| {
+            ui.style_mut().override_text_style = Some(egui::TextStyle::Monospace);
+
+            ui.heading("📊 Basic Metrics");
+            ui.label(format!("Volume (RMS): {:.3}", audio_analysis.volume));
+            ui.label(format!("Energy:       {:.2}", audio_analysis.energy));
+
+            ui.separator();
+
+            ui.heading("🎚️ Frequency Bands");
+            ui.label(format!("Bass:         {:.2}", audio_analysis.bass));
+            ui.label(format!("Mid:          {:.2}", audio_analysis.mid));
+            ui.label(format!("Treble:       {:.2}", audio_analysis.treble));
+
+            ui.separator();
+
+            ui.heading("🌈 Spectral Features");
+            ui.label(format!("Centroid:     {:.0} Hz", audio_analysis.centroid));
+            ui.label(format!("Flux:         {:.2}", audio_analysis.flux));
+            ui.label(format!("Rolloff (85%):{:.0} Hz", audio_analysis.rolloff));
+
+            ui.separator();
+
+            ui.heading("Raw Frequency Bins");
+            egui::ScrollArea::vertical().max_height(100.0).show(ui, |ui| {
+                for (i, bin) in audio_analysis.frequency_bins.iter().enumerate() {
+                    ui.label(format!("Bin {:02}: {:.3}", i, bin));
+                }
+            });
+    });
+}
+
 
 fn create_menu_button(parent: &mut ChildBuilder, text: &str, action: MenuButtonAction) {
     parent.spawn((
