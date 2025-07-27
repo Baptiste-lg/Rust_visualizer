@@ -28,10 +28,12 @@ impl Plugin for UiPlugin {
                     audio_details_panel_system,
                 )
                     .after(EguiSet::InitContexts)
-                    // The run_if on the group is good, but we add an internal check for extra safety on shutdown.
                     .run_if(in_state(AppState::Visualization2D)
                         .or_else(in_state(AppState::Visualization3D))
-                        .or_else(in_state(AppState::VisualizationOrb)))
+                        .or_else(in_state(AppState::VisualizationOrb))
+                        // ADDED: Make UI visible in the new state
+                        .or_else(in_state(AppState::VisualizationDisc))
+                    )
             );
     }
 }
@@ -142,7 +144,6 @@ fn mic_selection_interaction(
     }
 }
 
-// MODIFIED: Added a query for the primary window to prevent panics on exit.
 fn visualizer_ui_system(
     mut contexts: EguiContexts,
     mut config: ResMut<VisualsConfig>,
@@ -153,7 +154,6 @@ fn visualizer_ui_system(
     mut active_viz: ResMut<ActiveVisualization>,
     q_windows: Query<Entity, With<PrimaryWindow>>,
 ) {
-    // This check ensures the system doesn't run if the primary window is already gone.
     if q_windows.get_single().is_err() {
         return;
     }
@@ -179,7 +179,33 @@ fn visualizer_ui_system(
         if *current_state == AppState::Visualization2D {
             ui.separator();
             ui.heading("2D Bar Controls");
-            // ... (you can add controls for 2D here if needed)
+        }
+
+        // ADDED: UI controls for the Disc visualizer
+        if *current_state == AppState::VisualizationDisc {
+            ui.separator();
+            ui.heading("Disc Controls");
+
+            ui.label("Disc Color");
+            let mut color_temp_disc = [config.disc_color.r(), config.disc_color.g(), config.disc_color.b()];
+            if color_picker::color_edit_button_rgb(ui, &mut color_temp_disc).changed() {
+                config.disc_color = Color::rgb(color_temp_disc[0], color_temp_disc[1], color_temp_disc[2]);
+            }
+
+            ui.label("Radius");
+            ui.add(egui::Slider::new(&mut config.disc_radius, 0.1..=2.0));
+
+            ui.label("Line Thickness");
+            ui.add(egui::Slider::new(&mut config.disc_line_thickness, 0.01..=0.5));
+
+            ui.label("Iterations");
+            ui.add(egui::Slider::new(&mut config.disc_iterations, 1..=50));
+
+            ui.label("Speed");
+            ui.add(egui::Slider::new(&mut config.disc_speed, -5.0..=5.0));
+
+            ui.label("Center Radius Factor");
+            ui.add(egui::Slider::new(&mut config.disc_center_radius_factor, -1.0..=2.0));
         }
 
         if *current_state == AppState::Visualization3D {
@@ -226,16 +252,12 @@ fn visualizer_ui_system(
             ui.add(egui::Slider::new(&mut config.orb_treble_influence, 0.0..=1.0));
         }
 
-        // --- Global Controls ---
-
         ui.separator();
         let button_text = if viz_enabled.0 { "Deactivate Visualizer" } else { "Activate Visualizer" };
         if ui.button(button_text).clicked() {
             viz_enabled.0 = !viz_enabled.0;
         }
     });
-
-    // --- Bloom Window (Only in 3D views) ---
 
     if *current_state == AppState::Visualization3D || *current_state == AppState::VisualizationOrb {
         egui::Window::new("Bloom Settings").show(ctx, |ui| {
@@ -255,7 +277,6 @@ fn visualizer_ui_system(
             }
         });
     }
-
 
     egui::Window::new("Audio Source").show(ctx, |ui| {
         ui.label(format!("Current Source: {:?}", selected_source.0));
@@ -291,17 +312,20 @@ fn visualizer_ui_system(
             next_app_state.set(AppState::VisualizationOrb);
             active_viz.0 = AppState::VisualizationOrb;
         }
+        // ADDED: Button to select the new visualizer
+        if ui.button("2D Disc").clicked() {
+            next_app_state.set(AppState::VisualizationDisc);
+            active_viz.0 = AppState::VisualizationDisc;
+        }
     });
 }
 
-// MODIFIED: Added a query for the primary window to prevent panics on exit.
 fn audio_details_panel_system(
     mut contexts: EguiContexts,
     config: Res<VisualsConfig>,
     audio_analysis: Res<AudioAnalysis>,
     q_windows: Query<Entity, With<PrimaryWindow>>,
 ) {
-    // This check ensures the system doesn't run if the primary window is already gone.
     if q_windows.get_single().is_err() {
         return;
     }
