@@ -5,9 +5,10 @@ use bevy::{
     reflect::TypePath,
     render::render_resource::{AsBindGroup, ShaderRef},
     sprite::{Material2d, Material2dPlugin, MaterialMesh2dBundle},
-    window::PrimaryWindow, // On a besoin de ça pour obtenir la taille de la fenêtre
+    window::PrimaryWindow,
 };
-use crate::{AppState, config::VisualsConfig};
+// AJOUTÉ : On importe la ressource d'analyse audio et le tag de la caméra 2D
+use crate::{AppState, audio::AudioAnalysis, camera::MainCamera2D, config::VisualsConfig};
 
 pub struct VizDiscPlugin;
 
@@ -24,7 +25,7 @@ impl Plugin for VizDiscPlugin {
 #[derive(Component)]
 struct DiscScene;
 
-// On ajoute un champ pour la résolution de la fenêtre
+// MODIFIÉ : On ajoute le champ 'zoom'.
 #[derive(Asset, AsBindGroup, TypePath, Debug, Clone)]
 pub struct DiscMaterial {
     #[uniform(0)]
@@ -42,9 +43,15 @@ pub struct DiscMaterial {
     #[uniform(0)]
     center_radius_factor: f32,
     #[uniform(0)]
-    resolution: Vec2, // Le nouveau champ
+    resolution: Vec2,
+    #[uniform(0)]
+    bass: f32,
+    #[uniform(0)]
+    flux: f32,
+    // AJOUTÉ : Le champ pour faire passer le zoom au shader.
+    #[uniform(0)]
+    zoom: f32,
 }
-
 
 impl Material2d for DiscMaterial {
     fn fragment_shader() -> ShaderRef {
@@ -52,7 +59,7 @@ impl Material2d for DiscMaterial {
     }
 }
 
-// On initialise la scène avec une résolution de base.
+// MODIFIÉ : On initialise la valeur du zoom.
 fn setup_disc_scene(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -69,14 +76,17 @@ fn setup_disc_scene(
         iterations: config.disc_iterations as f32,
         speed: config.disc_speed,
         center_radius_factor: config.disc_center_radius_factor,
-        resolution: Vec2::new(800.0, 600.0), // Une valeur par défaut, sera mise à jour immédiatement
+        resolution: Vec2::new(800.0, 600.0),
+        bass: 0.0,
+        flux: 0.0,
+        // On initialise le zoom à 1.0 (pas de zoom).
+        zoom: 1.0,
     });
 
     commands.spawn((
         MaterialMesh2dBundle {
             mesh: quad_handle.into(),
             material: material_handle,
-            // On met le carré à une échelle immense pour qu'il couvre tout
             transform: Transform::from_scale(Vec3::splat(1_000_000.0)),
             ..default()
         },
@@ -84,17 +94,25 @@ fn setup_disc_scene(
     ));
 }
 
-// C'est ici qu'on met à jour toutes les données à chaque image.
+// MODIFIÉ : On récupère la valeur du zoom de la caméra et on la passe au matériau.
 fn update_disc_material(
     time: Res<Time>,
     config: Res<VisualsConfig>,
+    audio_analysis: Res<AudioAnalysis>,
     mut materials: ResMut<Assets<DiscMaterial>>,
-    // On récupère la fenêtre principale pour lire sa taille
     q_window: Query<&Window, With<PrimaryWindow>>,
+    // AJOUTÉ : Une query pour trouver la caméra 2D et lire sa projection.
+    q_camera: Query<&OrthographicProjection, With<MainCamera2D>>,
 ) {
-    // On s'assure que la fenêtre existe
     let Ok(window) = q_window.get_single() else { return };
     let window_resolution = Vec2::new(window.width(), window.height());
+
+    // On récupère le niveau de zoom actuel de la caméra.
+    let zoom_level = if let Ok(projection) = q_camera.get_single() {
+        projection.scale
+    } else {
+        1.0 // Valeur par défaut si on ne trouve pas la caméra.
+    };
 
     for (_, material) in materials.iter_mut() {
         material.time = time.elapsed_seconds();
@@ -104,8 +122,12 @@ fn update_disc_material(
         material.iterations = config.disc_iterations as f32;
         material.speed = config.disc_speed;
         material.center_radius_factor = config.disc_center_radius_factor;
-        // On met à jour la résolution dans le matériau
         material.resolution = window_resolution;
+        material.bass = audio_analysis.bass;
+        material.flux = audio_analysis.flux;
+
+        // AJOUTÉ : On met à jour le zoom dans le matériau.
+        material.zoom = zoom_level;
     }
 }
 

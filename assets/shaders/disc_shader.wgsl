@@ -1,6 +1,3 @@
-// Le #import n'est plus nécessaire car on n'utilise plus `view`.
-
-// La structure doit correspondre parfaitement à celle en Rust.
 struct DiscMaterial {
     color: vec4<f32>,
     time: f32,
@@ -9,22 +6,31 @@ struct DiscMaterial {
     iterations: f32,
     speed: f32,
     center_radius_factor: f32,
-    resolution: vec2<f32>, // Notre champ de résolution
+    resolution: vec2<f32>,
+    bass: f32,
+    flux: f32,
+    zoom: f32,
 };
 
-// On lie notre matériau comme avant.
 @group(2) @binding(0)
 var<uniform> material: DiscMaterial;
 
-// Fonction pour dessiner un arc.
+const PI : f32 = 3.1415926535;
+
+// MODIFIÉ : La fonction pour dessiner un arc, maintenant corrigée.
 fn ring(p: vec2<f32>, radius: f32, thickness: f32, angle_end: f32) -> f32 {
+    var angle = atan2(p.y, p.x);
     let dist = length(p);
-    let angle = atan2(p.y, p.x);
 
-    let smooth_edge = 0.01;
+    // LA CORRECTION CLÉ : On mappe l'angle de [-PI, PI] à [0, 2*PI].
+    if (angle < 0.0) {
+        angle = angle + 2.0 * PI;
+    }
 
-    let angle_check = smoothstep(0.0, smooth_edge, angle) *
-                      smoothstep(angle_end, angle_end - smooth_edge, angle);
+    let smooth_edge = 0.02; // Un peu plus large pour une meilleure jointure.
+
+    // On vérifie si l'angle du pixel est dans l'arc dessiné.
+    let angle_check = smoothstep(0.0, smooth_edge, angle) * smoothstep(angle_end, angle_end - smooth_edge, angle);
 
     let radius_check = smoothstep(radius - thickness / 2.0, radius - thickness / 2.0 + smooth_edge, dist) -
                        smoothstep(radius + thickness / 2.0, radius + thickness / 2.0 + smooth_edge, dist);
@@ -34,27 +40,28 @@ fn ring(p: vec2<f32>, radius: f32, thickness: f32, angle_end: f32) -> f32 {
 
 @fragment
 fn fragment(
-    // On prend la position du pixel comme donnée d'entrée.
     @builtin(position) frag_coord: vec4<f32>
 ) -> @location(0) vec4<f32> {
-
-    // LA CORRECTION FINALE :
-    // On normalise les coordonnées en utilisant notre propre variable `resolution`.
-    // On n'a plus besoin de `view`.
     var p = (frag_coord.xy / material.resolution) * 2.0 - 1.0;
     p.x = p.x * (material.resolution.x / material.resolution.y);
+    p = p * material.zoom;
 
-    let ap = vec2<f32>(p.x, -p.y);
+    let reactive_radius = material.radius + (material.bass * 0.1);
+    let reactive_thickness = material.line_thickness + (material.flux * 0.05);
+
     var final_frag: f32 = 0.0;
-
     for (var i = 0.0; i < material.iterations; i = i + 1.0) {
         let divi = i / material.iterations * material.center_radius_factor;
-        let current_radius = material.radius - divi;
+        let current_radius = reactive_radius - divi;
 
-        let end_angle = (sin(material.time * material.speed - divi * 5.0) * -1.5 + 1.5) * 3.1415926535;
+        // MODIFIÉ : On calcule l'angle pour qu'il aille de 0 à un peu plus que 2*PI.
+        let sine_wave = (sin(material.time * material.speed - divi * 5.0) * -0.5 + 0.5); // Va de 0.0 à 1.0
+        let full_circle = 2.0 * PI;
+        let overcompensation = 0.1; // Pour "dépasser" un peu et cacher la jointure.
+        let end_angle = sine_wave * (full_circle + overcompensation);
 
-        final_frag += ring(p, current_radius, material.line_thickness, end_angle);
-        final_frag += ring(ap, current_radius, material.line_thickness, end_angle);
+        // MODIFIÉ : On n'a plus besoin du miroir, un seul appel suffit.
+        final_frag += ring(p, current_radius, reactive_thickness, end_angle);
     }
 
     let final_color = material.color.rgb * clamp(final_frag, 0.0, 1.0);
