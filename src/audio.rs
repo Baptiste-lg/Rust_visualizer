@@ -7,9 +7,37 @@ use spectrum_analyzer::{samples_fft_to_spectrum, scaling::divide_by_N_sqrt, wind
 use std::io::Cursor;
 use std::sync::mpsc::{Receiver, Sender};
 use crate::{AppState, VisualizationEnabled, config::VisualsConfig};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 use std::collections::VecDeque;
+
+// --- Symphonia specific helper function ---
+
+// This function uses the Symphonia library to reliably get the duration of an audio file.
+// It's much more accurate for formats like VBR MP3 than other libraries.
+fn get_duration_with_symphonia(path: &Path) -> Result<Duration, Box<dyn std::error::Error>> {
+    let src = std::fs::File::open(path)?;
+    let mss = symphonia::core::io::MediaSourceStream::new(Box::new(src), Default::default());
+
+    let hint = symphonia::core::probe::Hint::new();
+    let meta_opts: symphonia::core::meta::MetadataOptions = Default::default();
+    let fmt_opts: symphonia::core::formats::FormatOptions = Default::default();
+
+    let probed = symphonia::default::get_probe().format(&hint, mss, &fmt_opts, &meta_opts)?;
+    let format = probed.format;
+
+    let track = format.tracks().iter().find(|t| t.codec_params.codec != symphonia::core::codecs::CODEC_TYPE_NULL).ok_or("No supported audio track found")?;
+
+    let time_base = track.codec_params.time_base.ok_or("Missing time base")?;
+    let n_frames = track.codec_params.n_frames.ok_or("Missing frame count")?;
+
+    let total_time = time_base.calc_time(n_frames);
+
+    Ok(Duration::from_secs(total_time.seconds) + Duration::from_secs_f64(total_time.frac))
+}
+
+
+// --- Bevy Plugin and Components ---
 
 // A tee adapter for audio data, sending a copy to an analysis channel.
 struct AudioDataTee<S> {
@@ -39,7 +67,6 @@ where
     fn sample_rate(&self) -> u32 { self.source.sample_rate() }
     fn total_duration(&self) -> Option<Duration> { self.source.total_duration() }
 }
-
 
 pub struct AudioPlugin;
 
@@ -105,6 +132,8 @@ pub struct PlaybackInfo {
     pub seek_to: Option<f32>, // A signal from the UI to seek to a new position (in seconds)
     // Internal state for tracking playback time
     pub(crate) last_update: Option<Instant>,
+    // MODIFIED: The playback position at the moment of `last_update`.
+    pub(crate) position_at_last_update: Duration,
 }
 
 impl PlaybackInfo {
@@ -116,9 +145,10 @@ impl PlaybackInfo {
         self.duration = Duration::ZERO;
         self.seek_to = None;
         self.last_update = None;
+        // MODIFIED: Also reset the new field.
+        self.position_at_last_update = Duration::ZERO;
     }
 }
-
 
 #[derive(Resource, Debug, Clone, PartialEq, Eq, Default)]
 pub enum AudioSource {
@@ -188,18 +218,31 @@ pub fn manage_audio_playback(
 
     match &selected_source.0 {
         AudioSource::File(path) => {
-            info!("Streaming and analyzing file: {:?}", path);
+            info!("Audio source changed. Attempting to load file: {:?}", path);
 
-            let file_bytes = std::fs::read(path).expect("Failed to read music file");
+            // Use Symphonia to get the duration, as it's the most reliable method.
+            let duration = match get_duration_with_symphonia(path) {
+                Ok(d) => {
+                    info!("✅ Successfully read duration with Symphonia: {:?}", d);
+                    d
+                },
+                Err(e) => {
+                    error!("❌ Failed to get duration with Symphonia: {}. The progress bar will be incorrect.", e);
+                    Duration::ZERO // If Symphonia fails, we can't trust other methods.
+                }
+            };
+
+            let file_bytes = std::fs::read(path).expect("Failed to read music file for playback");
             let cursor = Cursor::new(file_bytes);
             let source = Decoder::new(cursor).unwrap();
 
             commands.insert_resource(AudioInfo { sample_rate: source.sample_rate() });
 
-            // Update playback info with the new file's duration
-            playback_info.duration = source.total_duration().unwrap_or_default();
+            // MODIFIED: Correctly initialize the new position information.
+            playback_info.duration = duration;
             playback_info.status = PlaybackStatus::Playing;
             playback_info.last_update = Some(Instant::now());
+            playback_info.position_at_last_update = Duration::ZERO; // Playback starts at 0.
 
             let tee_source = AudioDataTee {
                 source: source.convert_samples(),
@@ -207,7 +250,6 @@ pub fn manage_audio_playback(
             };
 
             sink.append(tee_source);
-            // Don't auto-play here, let apply_playback_changes handle it
         }
         AudioSource::Microphone => {
             info!("Starting microphone capture");
@@ -253,30 +295,36 @@ fn apply_playback_changes(
         PlaybackStatus::Playing => {
             if sink.is_paused() {
                 sink.play();
+                // MODIFIED: When resuming, save the current position as the new base.
                 playback_info.last_update = Some(Instant::now());
+                playback_info.position_at_last_update = playback_info.position;
             }
         }
         PlaybackStatus::Paused => {
             if !sink.is_paused() {
                 sink.pause();
-                // Update position before pausing
+                // MODIFIED: When pausing, calculate and save the precise position.
                 if let Some(last_update) = playback_info.last_update.take() {
                     let elapsed = last_update.elapsed().as_secs_f32() * sink.speed();
-                    playback_info.position += Duration::from_secs_f32(elapsed);
+                    playback_info.position = playback_info.position_at_last_update + Duration::from_secs_f32(elapsed);
                 }
+                // MODIFIED: Clear `last_update` as time is no longer elapsing.
+                playback_info.last_update = None;
             }
         }
     }
 
     // Handle speed changes
     if sink.speed() != playback_info.speed {
-        // Update position before changing speed
+        // MODIFIED: Update position before changing speed.
         if !sink.is_paused() {
             if let Some(last_update) = playback_info.last_update.take() {
                 let elapsed = last_update.elapsed().as_secs_f32() * sink.speed();
-                playback_info.position += Duration::from_secs_f32(elapsed);
-                playback_info.last_update = Some(Instant::now());
+                playback_info.position = playback_info.position_at_last_update + Duration::from_secs_f32(elapsed);
             }
+            // MODIFIED: Set a new starting point for calculation.
+            playback_info.last_update = Some(Instant::now());
+            playback_info.position_at_last_update = playback_info.position;
         }
         sink.set_speed(playback_info.speed);
     }
@@ -304,8 +352,10 @@ fn apply_playback_changes(
             sink.clear();
             sink.append(tee_source);
 
-            // Update playback info
+            // MODIFIED: Update the position and the starting point.
             playback_info.position = seek_duration;
+            playback_info.position_at_last_update = seek_duration;
+
             if playback_info.status == PlaybackStatus::Playing {
                 sink.play();
                 playback_info.last_update = Some(Instant::now());
@@ -323,22 +373,20 @@ fn update_playback_position(
     sink: NonSend<Sink>,
 ) {
     if playback_info.status == PlaybackStatus::Playing {
+        // MODIFIED: The new position is calculated from a stable starting point.
         if let Some(last_update) = playback_info.last_update {
             let elapsed_since_update = last_update.elapsed().as_secs_f32() * sink.speed();
-            let new_pos = playback_info.position + Duration::from_secs_f32(elapsed_since_update);
+            let new_pos = playback_info.position_at_last_update + Duration::from_secs_f32(elapsed_since_update);
 
-            if new_pos > playback_info.duration && playback_info.duration != Duration::ZERO {
-                // Reset to end when playback finishes
+            if new_pos >= playback_info.duration && playback_info.duration != Duration::ZERO {
+                // Playback has finished
                 playback_info.position = playback_info.duration;
                 playback_info.status = PlaybackStatus::Paused;
                 playback_info.last_update = None;
             } else {
-                // This is a bit hacky. We don't want to constantly mark the resource as changed
-                // just for the time update, as it would re-trigger apply_playback_changes.
-                // The UI will read this value directly. So we update the inner value without
-                // triggering bevy's change detection.
-                let ptr = &mut *playback_info as *mut PlaybackInfo;
-                unsafe { (*ptr).position = new_pos; }
+                // MODIFIED: Update the position directly.
+                // `position` is now just for display and not used as a calculation base.
+                playback_info.position = new_pos;
             }
         }
     }
