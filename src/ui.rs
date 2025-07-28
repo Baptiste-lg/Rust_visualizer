@@ -3,11 +3,13 @@
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts, EguiSet};
 use bevy_egui::egui::color_picker;
-use crate::audio::{AudioAnalysis, AudioSource, SelectedAudioSource, SelectedMic};
+// MODIFIED
+use crate::audio::{AudioAnalysis, AudioSource, SelectedAudioSource, SelectedMic, PlaybackInfo, PlaybackStatus};
 use crate::config::VisualsConfig;
 use crate::{AppState, VisualizationEnabled, ActiveVisualization};
 use cpal::traits::{DeviceTrait, HostTrait};
 use bevy::window::PrimaryWindow;
+use std::time::Duration;
 
 
 pub struct UiPlugin;
@@ -26,12 +28,12 @@ impl Plugin for UiPlugin {
                 (
                     visualizer_ui_system,
                     audio_details_panel_system,
+                    playback_controls_system, // ADDED
                 )
                     .after(EguiSet::InitContexts)
                     .run_if(in_state(AppState::Visualization2D)
                         .or_else(in_state(AppState::Visualization3D))
                         .or_else(in_state(AppState::VisualizationOrb))
-                        // ADDED: Make UI visible in the new state
                         .or_else(in_state(AppState::VisualizationDisc))
                     )
             );
@@ -181,7 +183,6 @@ fn visualizer_ui_system(
             ui.heading("2D Bar Controls");
         }
 
-        // ADDED: UI controls for the Disc visualizer
         if *current_state == AppState::VisualizationDisc {
             ui.separator();
             ui.heading("Disc Controls");
@@ -312,13 +313,75 @@ fn visualizer_ui_system(
             next_app_state.set(AppState::VisualizationOrb);
             active_viz.0 = AppState::VisualizationOrb;
         }
-        // ADDED: Button to select the new visualizer
         if ui.button("2D Disc").clicked() {
             next_app_state.set(AppState::VisualizationDisc);
             active_viz.0 = AppState::VisualizationDisc;
         }
     });
 }
+
+// This system creates the UI window for controlling audio playback.
+fn playback_controls_system(
+    mut contexts: EguiContexts,
+    mut playback_info: ResMut<PlaybackInfo>,
+    selected_source: Res<SelectedAudioSource>,
+) {
+    // Only show the playback controls if a file is selected
+    if !matches!(selected_source.0, AudioSource::File(_)) {
+        return;
+    }
+
+    egui::Window::new("Playback Controls").show(contexts.ctx_mut(), |ui| {
+        ui.set_enabled(playback_info.duration > Duration::ZERO);
+
+        // --- Play/Pause Button ---
+        let button_text = if playback_info.status == PlaybackStatus::Playing { "⏸ Pause" } else { "▶ Play" };
+        if ui.button(button_text).clicked() {
+            playback_info.status = if playback_info.status == PlaybackStatus::Playing {
+                PlaybackStatus::Paused
+            } else {
+                PlaybackStatus::Playing
+            };
+        }
+
+        ui.separator();
+
+        // --- Progress Bar / Seeker ---
+        let total_secs = playback_info.duration.as_secs_f32();
+        let mut current_pos_secs = playback_info.position.as_secs_f32();
+
+        // Format time for display
+        let format_time = |secs: f32| -> String {
+            let total_seconds = secs.floor() as u64;
+            let minutes = total_seconds / 60;
+            let seconds = total_seconds % 60;
+            format!("{:02}:{:02}", minutes, seconds)
+        };
+
+        let progress_label = format!(
+            "{} / {}",
+            format_time(current_pos_secs),
+            format_time(total_secs)
+        );
+
+        ui.label("Progress");
+        let progress_slider = egui::Slider::new(&mut current_pos_secs, 0.0..=total_secs)
+            .show_value(false)
+            .text(progress_label);
+
+        // Check if the user is interacting with the slider to seek
+        if ui.add(progress_slider).changed() {
+            playback_info.seek_to = Some(current_pos_secs);
+        }
+
+        ui.separator();
+
+        // --- Speed Control ---
+        ui.label("Playback Speed");
+        ui.add(egui::Slider::new(&mut playback_info.speed, 0.25..=2.0).logarithmic(false));
+    });
+}
+
 
 fn audio_details_panel_system(
     mut contexts: EguiContexts,

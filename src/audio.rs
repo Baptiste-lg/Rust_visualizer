@@ -8,9 +8,10 @@ use std::io::Cursor;
 use std::sync::mpsc::{Receiver, Sender};
 use crate::{AppState, VisualizationEnabled, config::VisualsConfig};
 use std::path::PathBuf;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use std::collections::VecDeque;
 
+// A tee adapter for audio data, sending a copy to an analysis channel.
 struct AudioDataTee<S> {
     source: S,
     sender: Sender<f32>,
@@ -24,7 +25,7 @@ where
 
     fn next(&mut self) -> Option<Self::Item> {
         let sample = self.source.next()?;
-        self.sender.send(sample).ok();
+        self.sender.send(sample).ok(); // Send a copy for analysis
         Some(sample)
     }
 }
@@ -70,18 +71,51 @@ impl Plugin for AudioPlugin {
                     read_mic_data_system,
                     read_analysis_data_system,
                     manage_audio_playback,
+                    apply_playback_changes.after(manage_audio_playback),
+                    update_playback_position.after(apply_playback_changes),
                     audio_analysis_system
                         .after(read_mic_data_system)
                         .after(read_analysis_data_system)
                         .after(manage_audio_playback)
                         .run_if(|viz_enabled: Res<VisualizationEnabled>| viz_enabled.0),
                 )
-                // MODIFIED: Added the disc state to the run condition. THIS IS THE KEY FIX.
                 .run_if(in_state(AppState::Visualization2D)
                     .or_else(in_state(AppState::Visualization3D))
                     .or_else(in_state(AppState::VisualizationOrb))
                     .or_else(in_state(AppState::VisualizationDisc)))
             );
+    }
+}
+
+// Represents the current playback status.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum PlaybackStatus {
+    #[default]
+    Paused,
+    Playing,
+}
+
+// A resource to hold all information related to audio playback control.
+#[derive(Resource, Debug, Default)]
+pub struct PlaybackInfo {
+    pub status: PlaybackStatus,
+    pub speed: f32,
+    pub position: Duration,
+    pub duration: Duration,
+    pub seek_to: Option<f32>, // A signal from the UI to seek to a new position (in seconds)
+    // Internal state for tracking playback time
+    pub(crate) last_update: Option<Instant>,
+}
+
+impl PlaybackInfo {
+    // Resets the state, typically when no file is loaded.
+    pub fn reset(&mut self) {
+        self.status = PlaybackStatus::Paused;
+        self.speed = 1.0;
+        self.position = Duration::ZERO;
+        self.duration = Duration::ZERO;
+        self.seek_to = None;
+        self.last_update = None;
     }
 }
 
@@ -130,23 +164,27 @@ pub struct AudioAnalysis {
     pub rolloff: f32,
 }
 
+// This system is responsible for starting audio playback when the source changes.
 pub fn manage_audio_playback(
     mut commands: Commands,
-    mut selected_source: ResMut<SelectedAudioSource>,
+    selected_source: Res<SelectedAudioSource>,
     sink: NonSend<Sink>,
     mut mic_stream: NonSendMut<MicStream>,
     mic_sender: Res<MicAudioSender>,
     analysis_sender: Res<AnalysisAudioSender>,
     selected_mic: Res<SelectedMic>,
     mut audio_samples: ResMut<AudioSamples>,
+    mut playback_info: ResMut<PlaybackInfo>,
 ){
     if !selected_source.is_changed() {
         return;
     }
 
+    // Stop all current audio and reset state
     sink.stop();
     *mic_stream = MicStream(None);
     audio_samples.0.clear();
+    playback_info.reset(); // Reset playback info on source change
 
     match &selected_source.0 {
         AudioSource::File(path) => {
@@ -158,13 +196,18 @@ pub fn manage_audio_playback(
 
             commands.insert_resource(AudioInfo { sample_rate: source.sample_rate() });
 
+            // Update playback info with the new file's duration
+            playback_info.duration = source.total_duration().unwrap_or_default();
+            playback_info.status = PlaybackStatus::Playing;
+            playback_info.last_update = Some(Instant::now());
+
             let tee_source = AudioDataTee {
                 source: source.convert_samples(),
                 sender: analysis_sender.0.clone(),
             };
 
             sink.append(tee_source);
-            sink.play();
+            // Don't auto-play here, let apply_playback_changes handle it
         }
         AudioSource::Microphone => {
             info!("Starting microphone capture");
@@ -189,10 +232,118 @@ pub fn manage_audio_playback(
         }
         AudioSource::None => {
             info!("Stopping all audio");
-            selected_source.0 = AudioSource::None;
+            // State is already reset above
         }
     }
 }
+
+// This system applies changes from the UI (play, pause, speed, seek) to the audio sink.
+fn apply_playback_changes(
+    mut playback_info: ResMut<PlaybackInfo>,
+    sink: NonSend<Sink>,
+    selected_source: Res<SelectedAudioSource>,
+    analysis_sender: Res<AnalysisAudioSender>,
+) {
+    if !playback_info.is_changed() {
+        return;
+    }
+
+    // Handle Play/Pause state changes
+    match playback_info.status {
+        PlaybackStatus::Playing => {
+            if sink.is_paused() {
+                sink.play();
+                playback_info.last_update = Some(Instant::now());
+            }
+        }
+        PlaybackStatus::Paused => {
+            if !sink.is_paused() {
+                sink.pause();
+                // Update position before pausing
+                if let Some(last_update) = playback_info.last_update.take() {
+                    let elapsed = last_update.elapsed().as_secs_f32() * sink.speed();
+                    playback_info.position += Duration::from_secs_f32(elapsed);
+                }
+            }
+        }
+    }
+
+    // Handle speed changes
+    if sink.speed() != playback_info.speed {
+        // Update position before changing speed
+        if !sink.is_paused() {
+            if let Some(last_update) = playback_info.last_update.take() {
+                let elapsed = last_update.elapsed().as_secs_f32() * sink.speed();
+                playback_info.position += Duration::from_secs_f32(elapsed);
+                playback_info.last_update = Some(Instant::now());
+            }
+        }
+        sink.set_speed(playback_info.speed);
+    }
+
+    // Handle seeking
+    if let Some(seek_pos_secs) = playback_info.seek_to.take() {
+        if let AudioSource::File(path) = &selected_source.0 {
+            info!("Seeking to {} seconds", seek_pos_secs);
+            let seek_duration = Duration::from_secs_f32(seek_pos_secs);
+
+            // Recreate the source to seek
+            let file_bytes = std::fs::read(path).expect("Failed to read music file for seeking");
+            let cursor = Cursor::new(file_bytes);
+            let source = Decoder::new(cursor).unwrap();
+
+            let new_source = source.skip_duration(seek_duration).convert_samples();
+
+            let tee_source = AudioDataTee {
+                source: new_source,
+                sender: analysis_sender.0.clone(),
+            };
+
+            // Replace the sink's content
+            sink.stop();
+            sink.clear();
+            sink.append(tee_source);
+
+            // Update playback info
+            playback_info.position = seek_duration;
+            if playback_info.status == PlaybackStatus::Playing {
+                sink.play();
+                playback_info.last_update = Some(Instant::now());
+            } else {
+                sink.pause();
+                playback_info.last_update = None;
+            }
+        }
+    }
+}
+
+// This system continuously updates the playback position for the UI progress bar.
+fn update_playback_position(
+    mut playback_info: ResMut<PlaybackInfo>,
+    sink: NonSend<Sink>,
+) {
+    if playback_info.status == PlaybackStatus::Playing {
+        if let Some(last_update) = playback_info.last_update {
+            let elapsed_since_update = last_update.elapsed().as_secs_f32() * sink.speed();
+            let new_pos = playback_info.position + Duration::from_secs_f32(elapsed_since_update);
+
+            if new_pos > playback_info.duration && playback_info.duration != Duration::ZERO {
+                // Reset to end when playback finishes
+                playback_info.position = playback_info.duration;
+                playback_info.status = PlaybackStatus::Paused;
+                playback_info.last_update = None;
+            } else {
+                // This is a bit hacky. We don't want to constantly mark the resource as changed
+                // just for the time update, as it would re-trigger apply_playback_changes.
+                // The UI will read this value directly. So we update the inner value without
+                // triggering bevy's change detection.
+                let ptr = &mut *playback_info as *mut PlaybackInfo;
+                unsafe { (*ptr).position = new_pos; }
+            }
+        }
+    }
+}
+
 
 pub fn read_analysis_data_system(receiver: Option<NonSend<AnalysisAudioReceiver>>, mut buffer: ResMut<AudioSamples>) {
     if let Some(receiver) = receiver {

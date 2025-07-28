@@ -12,7 +12,7 @@ mod viz_disc;
 
 // --- Plugin Imports ---
 use crate::config::VisualsConfig;
-use crate::audio::{AudioPlugin, SelectedAudioSource, MicStream};
+use crate::audio::{AudioPlugin, SelectedAudioSource, MicStream, PlaybackInfo}; // MODIFIED
 use bevy::prelude::*;
 use bevy_egui::EguiPlugin;
 use rodio::{OutputStream, Sink};
@@ -21,8 +21,8 @@ use viz_2d::Viz2DPlugin;
 use viz_3d::Viz3DPlugin;
 use viz_orb::VizOrbPlugin;
 use camera::CameraPlugin;
-// ADDED: Import the new plugin
 use viz_disc::VizDiscPlugin;
+
 
 #[derive(States, Debug, Clone, PartialEq, Eq, Hash, Default)]
 pub enum AppState {
@@ -32,7 +32,6 @@ pub enum AppState {
     Visualization3D,
     Visualization2D,
     VisualizationOrb,
-    // ADDED: New state for the disc visualizer
     VisualizationDisc,
 }
 
@@ -68,6 +67,8 @@ fn main() {
         .init_resource::<SelectedAudioSource>()
         .init_resource::<VisualizationEnabled>()
         .init_resource::<ActiveVisualization>()
+        // ADDED: Initialize the new playback info resource
+        .init_resource::<PlaybackInfo>()
         .init_state::<AppState>()
         .add_plugins((
             EguiPlugin,
