@@ -2,6 +2,8 @@
 
 use bevy::prelude::*;
 
+// A resource that holds all the configurable parameters for the visualizations.
+// This allows users to tweak the visuals in real-time through the UI.
 #[derive(Resource, Clone)]
 pub struct VisualsConfig {
     // --- General Settings ---
@@ -31,14 +33,13 @@ pub struct VisualsConfig {
     pub orb_noise_frequency: f32,
     pub orb_treble_influence: f32,
 
-    // ADDED: Disc Visualizer Settings
+    // --- Disc Visualizer Settings ---
     pub disc_color: Color,
     pub disc_radius: f32,
     pub disc_line_thickness: f32,
     pub disc_iterations: i32,
     pub disc_speed: f32,
     pub disc_center_radius_factor: f32,
-
 }
 
 impl Default for VisualsConfig {
@@ -71,7 +72,7 @@ impl Default for VisualsConfig {
             orb_noise_frequency: 2.0,
             orb_treble_influence: 0.3,
 
-            // ADDED: Disc Visualizer Defaults
+            // --- Disc Visualizer Defaults ---
             disc_color: Color::rgb(1.0, 0.8, 0.2),
             disc_radius: 0.8,
             disc_line_thickness: 0.07,
