@@ -1,46 +1,52 @@
 // src/viz_2d.rs
 
+use crate::{audio::AudioAnalysis, config::VisualsConfig, AppState, VisualizationEnabled};
 use bevy::prelude::*;
-use crate::{AppState, audio::AudioAnalysis, config::VisualsConfig, VisualizationEnabled};
 
 pub struct Viz2DPlugin;
 
+// A resource to track the state of the bar chart, specifically the number of bands.
+// This helps in detecting when the chart needs to be rebuilt.
 #[derive(Resource, Default)]
 struct BarChartState {
     num_bands: usize,
 }
 
+// A marker component for the root entity of the 2D visualization scene.
 #[derive(Component)]
 struct Viz2DScene;
 
 impl Plugin for Viz2DPlugin {
     fn build(&self, app: &mut App) {
-        app
-            .init_resource::<BarChartState>()
+        app.init_resource::<BarChartState>()
             .add_systems(OnEnter(AppState::Visualization2D), setup_2d_scene)
-            .add_systems(Update, (
-                manage_bar_chart,
-                update_2d_visuals.after(manage_bar_chart),
-            )
-                .run_if(in_state(AppState::Visualization2D))
-                .run_if(|viz_enabled: Res<VisualizationEnabled>| viz_enabled.0)
+            .add_systems(
+                Update,
+                (
+                    manage_bar_chart,
+                    update_2d_visuals.after(manage_bar_chart),
+                )
+                    .run_if(in_state(AppState::Visualization2D))
+                    .run_if(|viz_enabled: Res<VisualizationEnabled>| viz_enabled.0),
             )
             .add_systems(OnExit(AppState::Visualization2D), despawn_scene);
     }
 }
 
+// A component attached to each bar in the 2D visualizer.
+// It stores the index of the frequency band this bar represents.
 #[derive(Component)]
 struct VizBar {
     index: usize,
 }
 
+// Sets up the initial scene for the 2D visualizer by spawning a root entity.
 fn setup_2d_scene(mut commands: Commands) {
-    commands.spawn((
-        SpatialBundle::default(),
-        Viz2DScene,
-    ));
+    commands.spawn((SpatialBundle::default(), Viz2DScene));
 }
 
+// Despawns the entire 2D visualizer scene and resets its state
+// when exiting the `Visualization2D` state.
 fn despawn_scene(mut commands: Commands, scene_query: Query<Entity, With<Viz2DScene>>) {
     if let Ok(entity) = scene_query.get_single() {
         commands.entity(entity).despawn_recursive();
@@ -48,6 +54,8 @@ fn despawn_scene(mut commands: Commands, scene_query: Query<Entity, With<Viz2DSc
     commands.insert_resource(BarChartState::default());
 }
 
+// Manages the bar chart by checking if the configuration has changed.
+// If the number of bands changes, it despawns the old bars and spawns new ones.
 fn manage_bar_chart(
     mut commands: Commands,
     config: Res<VisualsConfig>,
@@ -55,8 +63,10 @@ fn manage_bar_chart(
     bar_query: Query<Entity, With<VizBar>>,
     scene_query: Query<Entity, With<Viz2DScene>>,
 ) {
+    // Rebuild the bar chart if the config has changed.
     if config.is_changed() {
         if let Ok(scene_entity) = scene_query.get_single() {
+            // Despawn existing bars before creating new ones.
             for entity in &bar_query {
                 commands.entity(entity).despawn_recursive();
             }
@@ -66,11 +76,8 @@ fn manage_bar_chart(
     }
 }
 
-fn spawn_visuals(
-    mut commands: Commands,
-    config: &VisualsConfig,
-    parent_entity: Entity,
-) {
+// Spawns the individual bars for the 2D visualizer.
+fn spawn_visuals(mut commands: Commands, config: &VisualsConfig, parent_entity: Entity) {
     let num_bars = config.num_bands;
     let bar_width = 40.0;
     let spacing = 10.0;
@@ -96,6 +103,7 @@ fn spawn_visuals(
     });
 }
 
+// Updates the height and color of the bars based on the audio analysis.
 fn update_2d_visuals(
     audio_analysis: Res<AudioAnalysis>,
     config: Res<VisualsConfig>,
@@ -111,13 +119,15 @@ fn update_2d_visuals(
         if let Some(amplitude) = audio_analysis.frequency_bins.get(bar.index) {
             let target_height = 50.0 + amplitude * config.bass_sensitivity * 100.0;
 
+            // Apply smoothing to the height change for a smoother animation.
             let current_size = sprite.custom_size.unwrap_or(Vec2::ZERO);
             let new_height = current_size.y + (target_height - current_size.y) * smoothing_factor;
             sprite.custom_size = Some(Vec2::new(current_size.x, new_height));
 
+            // Adjust the y-position to keep the base of the bar aligned.
             transform.translation.y = new_height / 2.0 - 25.0;
 
-            // CORRECTED LOGIC: Reverted to manual color interpolation
+            // Interpolate the bar's color based on its height.
             let color_intensity = (new_height / 800.0).clamp(0.0, 1.0);
             let inactive = config.viz2d_inactive_color;
             let active = config.viz2d_active_color;
