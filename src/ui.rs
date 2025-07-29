@@ -1,7 +1,7 @@
 // src/ui.rs
 
 use crate::audio::{
-    AudioAnalysis, AudioSource, PlaybackInfo, PlaybackStatus, SelectedAudioSource,
+    AudioAnalysis, AudioSource, PlaybackInfo, PlaybackStatus, SelectedAudioSource, SelectedMic,
 };
 use crate::config::VisualsConfig;
 use crate::{ActiveVisualization, AppState, VisualizationEnabled};
@@ -9,6 +9,7 @@ use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 use bevy_egui::egui::color_picker;
 use bevy_egui::{egui, EguiContexts, EguiSet};
+use cpal::traits::{DeviceTrait, HostTrait};
 use std::time::Duration;
 
 pub struct UiPlugin;
@@ -21,6 +22,12 @@ impl Plugin for UiPlugin {
                 menu_button_interaction.run_if(in_state(AppState::MainMenu)),
             )
             .add_systems(OnExit(AppState::MainMenu), cleanup_menu)
+            .add_systems(OnEnter(AppState::MicSelection), setup_mic_selection_menu)
+            .add_systems(
+                Update,
+                mic_selection_interaction.run_if(in_state(AppState::MicSelection)),
+            )
+            .add_systems(OnExit(AppState::MicSelection), cleanup_menu)
             .add_systems(
                 Update,
                 (
@@ -43,11 +50,14 @@ impl Plugin for UiPlugin {
 #[derive(Component)]
 enum MenuButtonAction {
     Start,
+    ToMicSelection,
 }
 
 // A marker component for all UI elements in the main menu.
 #[derive(Component)]
 struct MainMenuUI;
+#[derive(Component)]
+struct MicDeviceButton(String);
 
 // Sets up the main menu UI when entering the `MainMenu` state.
 fn setup_main_menu(mut commands: Commands) {
@@ -70,6 +80,11 @@ fn setup_main_menu(mut commands: Commands) {
         ))
         .with_children(|parent| {
             create_menu_button(parent, "Start Visualization", MenuButtonAction::Start);
+            create_menu_button(
+                parent,
+                "Select Microphone",
+                MenuButtonAction::ToMicSelection,
+            );
         });
 }
 
@@ -86,7 +101,91 @@ fn menu_button_interaction(
                     // Transition to the last active visualization.
                     next_app_state.set(active_viz.0.clone());
                 }
+                MenuButtonAction::ToMicSelection => {
+                    next_app_state.set(AppState::MicSelection);
+                }
             }
+        }
+    }
+}
+
+fn setup_mic_selection_menu(mut commands: Commands) {
+    commands.spawn((Camera2dBundle::default(), MainMenuUI));
+    let mut root = commands.spawn((
+        NodeBundle {
+            style: Style {
+                width: Val::Percent(100.0),
+                height: Val::Percent(100.0),
+                align_items: AlignItems::Center,
+                justify_content: JustifyContent::Center,
+                flex_direction: FlexDirection::Column,
+                row_gap: Val::Px(10.0),
+                ..default()
+            },
+            ..default()
+        },
+        MainMenuUI,
+    ));
+
+    root.with_children(|parent| {
+        parent.spawn(TextBundle::from_section(
+            "Select an Input Device",
+            TextStyle {
+                font_size: 32.0,
+                color: Color::WHITE,
+                ..default()
+            },
+        ));
+    });
+
+    let host = cpal::default_host();
+    if let Ok(devices) = host.input_devices() {
+        root.with_children(|parent| {
+            for device in devices {
+                if let Ok(name) = device.name() {
+                    parent
+                        .spawn((
+                            ButtonBundle {
+                                style: Style {
+                                    width: Val::Px(500.0),
+                                    height: Val::Px(50.0),
+                                    justify_content: JustifyContent::Center,
+                                    align_items: AlignItems::Center,
+                                    margin: UiRect::top(Val::Px(5.0)),
+                                    ..default()
+                                },
+                                background_color: Color::rgb(0.2, 0.2, 0.2).into(),
+                                ..default()
+                            },
+                            MicDeviceButton(name.clone()),
+                        ))
+                        .with_children(|btn| {
+                            btn.spawn(TextBundle::from_section(
+                                name,
+                                TextStyle {
+                                    font_size: 18.0,
+                                    color: Color::WHITE,
+                                    ..default()
+                                },
+                            ));
+                        });
+                }
+            }
+        });
+    } else {
+        error!("Failed to get input devices");
+    }
+}
+
+fn mic_selection_interaction(
+    mut button_query: Query<(&Interaction, &MicDeviceButton)>,
+    mut selected_mic: ResMut<SelectedMic>,
+    mut next_app_state: ResMut<NextState<AppState>>,
+) {
+    for (interaction, button) in &mut button_query {
+        if *interaction == Interaction::Pressed {
+            selected_mic.0 = Some(button.0.clone());
+            next_app_state.set(AppState::MainMenu);
         }
     }
 }
@@ -121,6 +220,11 @@ fn visualizer_ui_system(
         ui.add(egui::Slider::new(&mut config.bass_sensitivity, 0.0..=8.0));
 
         // --- Specific Controls for each visualization ---
+
+        if *current_state == AppState::Visualization2D {
+            ui.separator();
+            ui.heading("2D Bar Controls");
+        }
 
         if *current_state == AppState::VisualizationDisc {
             ui.separator();
@@ -244,6 +348,10 @@ fn visualizer_ui_system(
     egui::Window::new("Audio Source").show(ctx, |ui| {
         ui.label(format!("Current Source: {:?}", selected_source.0));
         ui.separator();
+
+        if ui.button("Use Microphone").clicked() {
+            selected_source.0 = AudioSource::Microphone;
+        }
 
         if ui.button("Choose Audio File").clicked() {
             if let Some(path) = rfd::FileDialog::new()

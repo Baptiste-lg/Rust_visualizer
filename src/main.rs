@@ -11,7 +11,7 @@ mod viz_disc;
 mod viz_orb;
 
 // --- Plugin Imports ---
-use crate::audio::{AudioPlugin, PlaybackInfo, SelectedAudioSource};
+use crate::audio::{AudioPlugin, MicStream, PlaybackInfo, SelectedAudioSource};
 use crate::camera::CameraPlugin;
 use crate::config::VisualsConfig;
 use crate::ui::UiPlugin;
@@ -70,6 +70,7 @@ fn main() {
         // Insert audio resources required for playback and analysis.
         .insert_non_send_resource(stream)
         .insert_non_send_resource(Sink::try_new(&stream_handle).unwrap())
+        .insert_non_send_resource(MicStream(None))
         // Initialize all application resources and states.
         .init_resource::<VisualsConfig>()
         .init_resource::<SelectedAudioSource>()

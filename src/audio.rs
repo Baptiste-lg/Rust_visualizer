@@ -15,8 +15,8 @@ use std::time::{Duration, Instant};
 
 // --- Symphonia Helper ---
 
-// This function uses the Symphonia library to reliably get the duration of an audio file.
-// It's much more accurate for formats like VBR MP3 than other libraries.
+/// Uses the Symphonia library to reliably get the duration of an audio file.
+/// This method is particularly accurate for formats with variable bitrates (VBR) like some MP3s.
 fn get_duration_with_symphonia(path: &Path) -> Result<Duration, Box<dyn std::error::Error>> {
     let src = std::fs::File::open(path)?;
     let mss = symphonia::core::io::MediaSourceStream::new(Box::new(src), Default::default());
@@ -44,8 +44,8 @@ fn get_duration_with_symphonia(path: &Path) -> Result<Duration, Box<dyn std::err
 
 // --- Bevy Plugin and Components ---
 
-// A "tee" adapter for audio data. While the audio plays, this struct
-// sends a copy of each raw audio sample to a channel for real-time analysis.
+/// A "tee" adapter for audio data. While the audio plays through the `rodio` sink,
+/// this struct sends a copy of each raw audio sample to a channel for real-time analysis.
 struct AudioDataTee<S> {
     source: S,
     sender: Sender<f32>,
@@ -59,7 +59,8 @@ where
 
     fn next(&mut self) -> Option<Self::Item> {
         let sample = self.source.next()?;
-        self.sender.send(sample).ok(); // Send a copy for analysis.
+        // Send a copy of the sample for analysis, ignoring any errors if the receiver is dropped.
+        self.sender.send(sample).ok();
         Some(sample)
     }
 }
@@ -82,36 +83,46 @@ where
     }
 }
 
+/// The main Bevy plugin for handling all audio-related logic,
+/// including playback, microphone input, and analysis.
 pub struct AudioPlugin;
 
 #[derive(Resource)]
 pub struct AnalysisTimer(pub Timer);
 
+/// A channel sender for passing raw audio samples to the analysis system.
 #[derive(Resource, Clone)]
 pub struct AnalysisAudioSender(pub Sender<f32>);
+/// A channel receiver for raw audio samples.
 pub struct AnalysisAudioReceiver(pub Receiver<f32>);
 
 impl Plugin for AudioPlugin {
     fn build(&self, app: &mut App) {
+        let (mic_tx, mic_rx) = std::sync::mpsc::channel::<Vec<f32>>();
         let (analysis_tx, analysis_rx) = std::sync::mpsc::channel::<f32>();
 
         app.insert_resource(AnalysisTimer(Timer::new(
-            Duration::from_secs_f32(1.0 / 60.0),
+            Duration::from_secs_f32(1.0 / 60.0), // Aim for 60 analysis updates per second.
             TimerMode::Repeating,
         )))
+        .insert_resource(MicAudioSender(mic_tx))
+        .insert_non_send_resource(MicAudioReceiver(mic_rx))
         .insert_resource(AnalysisAudioSender(analysis_tx))
         .insert_non_send_resource(AnalysisAudioReceiver(analysis_rx))
         .init_resource::<AudioSamples>()
         .init_resource::<AudioAnalysis>()
         .init_resource::<SelectedMic>()
+        .init_resource::<MicAudioBuffer>()
         .add_systems(
             Update,
             (
+                read_mic_data_system,
                 read_analysis_data_system,
                 manage_audio_playback,
                 apply_playback_changes.after(manage_audio_playback),
                 update_playback_position.after(apply_playback_changes),
                 audio_analysis_system
+                    .after(read_mic_data_system)
                     .after(read_analysis_data_system)
                     .after(manage_audio_playback)
                     .run_if(|viz_enabled: Res<VisualizationEnabled>| viz_enabled.0),
@@ -126,7 +137,7 @@ impl Plugin for AudioPlugin {
     }
 }
 
-// Represents the current playback status of a file.
+/// Represents the current playback status of a file.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum PlaybackStatus {
     #[default]
@@ -134,30 +145,39 @@ pub enum PlaybackStatus {
     Playing,
 }
 
-// A resource to hold all information related to audio playback control.
+/// A resource to hold all information related to audio playback control.
 #[derive(Resource, Debug, Default)]
 pub struct PlaybackInfo {
     pub status: PlaybackStatus,
     pub speed: f32,
     pub position: Duration,
     pub duration: Duration,
+    /// A signal from the UI to seek to a new position (in seconds).
     pub seek_to: Option<f32>,
-    // Internal state for tracking playback time accurately.
+    /// Internal state for accurately tracking playback time.
     pub(crate) last_update: Option<Instant>,
+    /// The playback position at the moment of `last_update`. Used as a stable base for calculations.
     pub(crate) position_at_last_update: Duration,
 }
 
 impl PlaybackInfo {
-    // Resets the state, typically when no file is loaded.
+    /// Resets the state, typically when no file is loaded or the source changes.
     pub fn reset(&mut self) {
-        *self = PlaybackInfo::default();
+        self.status = PlaybackStatus::Paused;
+        self.speed = 1.0;
+        self.position = Duration::ZERO;
+        self.duration = Duration::ZERO;
+        self.seek_to = None;
+        self.last_update = None;
+        self.position_at_last_update = Duration::ZERO;
     }
 }
 
-// Defines the selected source for audio input.
+/// Defines the selected source for audio input.
 #[derive(Resource, Debug, Clone, PartialEq, Eq, Default)]
 pub enum AudioSource {
     File(PathBuf),
+    Microphone,
     #[default]
     None,
 }
@@ -168,16 +188,29 @@ pub struct SelectedAudioSource(pub AudioSource);
 #[derive(Resource, Default)]
 pub struct SelectedMic(pub Option<String>);
 
+#[derive(Resource, Clone)]
+pub struct MicAudioSender(pub Sender<Vec<f32>>);
+pub struct MicAudioReceiver(pub Receiver<Vec<f32>>);
+
+/// A non-send resource holding the microphone input stream.
+#[allow(dead_code)]
+pub struct MicStream(pub Option<cpal::Stream>);
+
+/// A buffer for incoming microphone audio data.
+#[derive(Resource, Default)]
+pub struct MicAudioBuffer(pub VecDeque<f32>);
+
+/// A buffer for audio data from files, ready for analysis.
 #[derive(Resource, Default, Clone)]
 pub struct AudioSamples(pub VecDeque<f32>);
 
-// Holds metadata about the currently playing audio.
+/// Holds metadata about the currently playing audio.
 #[derive(Resource)]
 pub struct AudioInfo {
     pub sample_rate: u32,
 }
 
-// Stores the results of the audio analysis.
+/// Stores the results of the audio analysis, to be used by the visualizations.
 #[derive(Resource, Default)]
 pub struct AudioAnalysis {
     pub frequency_bins: Vec<f32>,
@@ -187,16 +220,20 @@ pub struct AudioAnalysis {
     pub treble_average: f32,
     pub volume: f32,
     pub flux: f32,
+    /// Holds the spectrum data from the previous frame to calculate spectral flux.
+    pub previous_spectrum: Vec<(f32, f32)>,
 }
 
-// This system manages the audio source. When the `SelectedAudioSource` resource
-// changes (e.g., user picks a new file), it stops the current audio,
-// clears the old state, and starts playing the new source.
+/// Manages the audio source. When the `SelectedAudioSource` resource
+/// changes, it stops the current audio, clears old state, and starts the new source.
 pub fn manage_audio_playback(
     mut commands: Commands,
     selected_source: Res<SelectedAudioSource>,
     sink: NonSend<Sink>,
+    mut mic_stream: NonSendMut<MicStream>,
+    mic_sender: Res<MicAudioSender>,
     analysis_sender: Res<AnalysisAudioSender>,
+    selected_mic: Res<SelectedMic>,
     mut audio_samples: ResMut<AudioSamples>,
     mut playback_info: ResMut<PlaybackInfo>,
 ) {
@@ -204,8 +241,9 @@ pub fn manage_audio_playback(
         return;
     }
 
-    // Stop all current audio and reset state
+    // Stop all current audio and reset state before starting a new source.
     sink.stop();
+    *mic_stream = MicStream(None);
     audio_samples.0.clear();
     playback_info.reset();
 
@@ -216,7 +254,6 @@ pub fn manage_audio_playback(
                 path
             );
 
-            // Use Symphonia to get the duration, as it's the most reliable method.
             let duration = match get_duration_with_symphonia(path) {
                 Ok(d) => {
                     info!("✅ Successfully read duration with Symphonia: {:?}", d);
@@ -250,6 +287,46 @@ pub fn manage_audio_playback(
 
             sink.append(tee_source);
         }
+        AudioSource::Microphone => {
+            info!("Starting microphone capture");
+            let host = cpal::default_host();
+            let device = selected_mic
+                .0
+                .as_ref()
+                .and_then(|name| {
+                    host.input_devices()
+                        .ok()?
+                        .find(|d| d.name().unwrap_or_default() == *name)
+                })
+                .unwrap_or_else(|| {
+                    host.default_input_device()
+                        .expect("No default audio input device found")
+                });
+            let config = device
+                .default_input_config()
+                .expect("Failed to get default input config");
+            info!(
+                "Initializing microphone: {} with config {:?}",
+                device.name().unwrap(),
+                config
+            );
+            commands.insert_resource(AudioInfo {
+                sample_rate: config.sample_rate().0,
+            });
+            let tx = mic_sender.0.clone();
+            let stream = device
+                .build_input_stream(
+                    &config.into(),
+                    move |data: &[f32], _: &cpal::InputCallbackInfo| {
+                        tx.send(data.to_vec()).ok();
+                    },
+                    |err| error!("An error occurred on the audio stream: {}", err),
+                    None,
+                )
+                .expect("Failed to build input stream");
+            stream.play().expect("Failed to play audio stream");
+            *mic_stream = MicStream(Some(stream));
+        }
         AudioSource::None => {
             info!("Stopping all audio");
             // State is already reset above.
@@ -257,7 +334,7 @@ pub fn manage_audio_playback(
     }
 }
 
-// This system applies changes from the UI (play, pause, speed, seek) to the audio sink.
+/// Applies changes from the UI (play, pause, speed, seek) to the `rodio` audio sink.
 fn apply_playback_changes(
     mut playback_info: ResMut<PlaybackInfo>,
     sink: NonSend<Sink>,
@@ -268,12 +345,13 @@ fn apply_playback_changes(
         return;
     }
 
-    // Handle Play/Pause state changes
+    // Handle Play/Pause state changes.
     match playback_info.status {
         PlaybackStatus::Playing => {
             if sink.is_paused() {
                 sink.play();
-                // When resuming, save the current position as the new base for time calculation.
+                // When resuming, record the current time and position to serve as a new, stable
+                // base for calculating the progress bar position. This prevents drift.
                 playback_info.last_update = Some(Instant::now());
                 playback_info.position_at_last_update = playback_info.position;
             }
@@ -281,45 +359,46 @@ fn apply_playback_changes(
         PlaybackStatus::Paused => {
             if !sink.is_paused() {
                 sink.pause();
-                // When pausing, calculate and save the precise position.
+                // When pausing, calculate and save the precise position up to this moment.
                 if let Some(last_update) = playback_info.last_update.take() {
                     let elapsed = last_update.elapsed().as_secs_f32() * sink.speed();
                     playback_info.position =
                         playback_info.position_at_last_update + Duration::from_secs_f32(elapsed);
                 }
-                // Time is no longer elapsing, so clear the update instant.
+                // Clear `last_update` as time is no longer elapsing.
                 playback_info.last_update = None;
             }
         }
     }
 
-    // Handle speed changes
+    // Handle speed changes.
     if sink.speed() != playback_info.speed {
-        // Update position before changing speed to maintain accuracy.
+        // Before changing speed, update the position to the current moment to maintain accuracy.
         if !sink.is_paused() {
             if let Some(last_update) = playback_info.last_update.take() {
                 let elapsed = last_update.elapsed().as_secs_f32() * sink.speed();
                 playback_info.position =
                     playback_info.position_at_last_update + Duration::from_secs_f32(elapsed);
             }
-            // Set a new starting point for calculation.
+            // After updating, set a new starting point for future calculations.
             playback_info.last_update = Some(Instant::now());
             playback_info.position_at_last_update = playback_info.position;
         }
         sink.set_speed(playback_info.speed);
     }
 
-    // Handle seeking
+    // Handle seeking requested by the UI.
     if let Some(seek_pos_secs) = playback_info.seek_to.take() {
         if let AudioSource::File(path) = &selected_source.0 {
             info!("Seeking to {} seconds", seek_pos_secs);
             let seek_duration = Duration::from_secs_f32(seek_pos_secs);
 
-            // Recreate the audio source to seek to the new position.
+            // To seek, the entire audio source must be recreated and replaced in the sink.
             let file_bytes = std::fs::read(path).expect("Failed to read music file for seeking");
             let cursor = Cursor::new(file_bytes);
             let source = Decoder::new(cursor).unwrap();
 
+            // Create a new source that skips to the desired duration.
             let new_source = source.skip_duration(seek_duration).convert_samples();
 
             let tee_source = AudioDataTee {
@@ -332,7 +411,7 @@ fn apply_playback_changes(
             sink.clear();
             sink.append(tee_source);
 
-            // Update the position and the starting point for time calculation.
+            // Update our internal tracking to reflect the new position.
             playback_info.position = seek_duration;
             playback_info.position_at_last_update = seek_duration;
 
@@ -347,10 +426,12 @@ fn apply_playback_changes(
     }
 }
 
-// This system continuously updates the playback position for the UI progress bar.
+/// Continuously updates the playback position for the UI progress bar.
 fn update_playback_position(mut playback_info: ResMut<PlaybackInfo>, sink: NonSend<Sink>) {
     if playback_info.status == PlaybackStatus::Playing {
-        // The new position is calculated from a stable starting point to avoid drift.
+        // The new position is calculated from a stable starting point (`position_at_last_update`)
+        // plus the time elapsed since then. This is more robust against floating-point drift
+        // than simply adding delta time each frame.
         if let Some(last_update) = playback_info.last_update {
             let elapsed_since_update = last_update.elapsed().as_secs_f32() * sink.speed();
             let new_pos = playback_info.position_at_last_update
@@ -369,7 +450,7 @@ fn update_playback_position(mut playback_info: ResMut<PlaybackInfo>, sink: NonSe
     }
 }
 
-// Reads raw audio samples from the analysis channel into a buffer.
+/// Reads raw audio samples from the analysis channel into a buffer.
 pub fn read_analysis_data_system(
     receiver: Option<NonSend<AnalysisAudioReceiver>>,
     mut buffer: ResMut<AudioSamples>,
@@ -379,8 +460,20 @@ pub fn read_analysis_data_system(
     }
 }
 
-// Performs the Fast Fourier Transform (FFT) on the buffered audio samples
-// to get frequency data for the visualizations.
+/// Reads raw audio data from the microphone channel into a buffer.
+pub fn read_mic_data_system(
+    receiver: Option<NonSend<MicAudioReceiver>>,
+    mut buffer: ResMut<MicAudioBuffer>,
+) {
+    if let Some(receiver) = receiver {
+        for new_data in receiver.0.try_iter() {
+            buffer.0.extend(new_data);
+        }
+    }
+}
+
+/// Performs the Fast Fourier Transform (FFT) on buffered audio samples
+/// to get frequency data for the visualizations.
 pub fn audio_analysis_system(
     time: Res<Time>,
     mut analysis_timer: ResMut<AnalysisTimer>,
@@ -388,6 +481,7 @@ pub fn audio_analysis_system(
     audio_info: Option<Res<AudioInfo>>,
     audio_source: Res<SelectedAudioSource>,
     mut audio_samples: ResMut<AudioSamples>,
+    mut mic_buffer: ResMut<MicAudioBuffer>,
     config: Res<VisualsConfig>,
 ) {
     analysis_timer.0.tick(time.delta());
@@ -398,33 +492,46 @@ pub fn audio_analysis_system(
     let Some(audio_info) = audio_info else { return };
     let fft_size = 4096;
 
-    // Determine the source of the audio samples.
-    let analysis_buffer: Option<Vec<f32>> = if let AudioSource::File(_) = &audio_source.0 {
-        if audio_samples.0.len() < fft_size {
-            None
-        } else {
-            let buffer_len = audio_samples.0.len();
-            let analysis_vec = audio_samples.0.iter().copied().take(fft_size).collect();
-            // Drain half the FFT size to create overlapping windows, which smooths the analysis.
-            let drain_amount = buffer_len.saturating_sub(fft_size / 2);
-            audio_samples.0.drain(..drain_amount);
-            Some(analysis_vec)
+    // Determine the source of the audio samples (file or microphone).
+    let analysis_buffer: Option<Vec<f32>> = match &audio_source.0 {
+        AudioSource::File(_) => {
+            if audio_samples.0.len() < fft_size {
+                None
+            } else {
+                let buffer_len = audio_samples.0.len();
+                let analysis_vec = audio_samples.0.iter().copied().take(fft_size).collect();
+                // Drain half the FFT size to create overlapping windows, which smooths the analysis.
+                let drain_amount = buffer_len.saturating_sub(fft_size / 2);
+                audio_samples.0.drain(..drain_amount);
+                Some(analysis_vec)
+            }
         }
-    } else {
-        None
+        AudioSource::Microphone => {
+            if mic_buffer.0.len() < fft_size {
+                None
+            } else {
+                let buffer_len = mic_buffer.0.len();
+                let analysis_vec = mic_buffer.0.iter().copied().take(fft_size).collect();
+                let drain_amount = buffer_len.saturating_sub(fft_size / 2);
+                mic_buffer.0.drain(..drain_amount);
+                Some(analysis_vec)
+            }
+        }
+        AudioSource::None => None,
     };
 
     let Some(samples_slice) = analysis_buffer else { return };
 
-    // Apply a Hann window to the samples to reduce spectral leakage.
+    // Apply a Hann window to the samples to reduce spectral leakage, which is an
+    // artifact of FFT on non-periodic signals.
     let hann_window = hann_window(&samples_slice);
 
     // Compute the spectrum from the windowed samples.
     let spectrum = samples_fft_to_spectrum(
         &hann_window,
         audio_info.sample_rate,
-        FrequencyLimit::Range(20.0, 20000.0),
-        Some(&divide_by_N_sqrt),
+        FrequencyLimit::Range(20.0, 20000.0), // Human hearing range
+        Some(&divide_by_N_sqrt), // Scaling function
     )
     .expect("Failed to compute spectrum");
 
@@ -435,8 +542,8 @@ pub fn audio_analysis_system(
     let spectrum_data: Vec<(f32, f32)> =
         spectrum.data().iter().map(|(f, v)| (f.val(), v.val())).collect();
 
-    // Calculate spectral flux: the rate of change in the spectrum.
-    // This can be used to detect transients or changes in the music.
+    // Calculate spectral flux: the rate of change in the spectrum's magnitude.
+    // This can be used to detect transients or "beat" changes in the music.
     if !audio_analysis.previous_spectrum.is_empty()
         && audio_analysis.previous_spectrum.len() == spectrum_data.len()
     {
@@ -496,4 +603,7 @@ pub fn audio_analysis_system(
         .take(num_bands / 2)
         .sum();
     audio_analysis.treble = audio_analysis.frequency_bins.iter().skip(3 * num_bands / 4).sum();
+
+    // Store the current spectrum for the next frame's flux calculation.
+    audio_analysis.previous_spectrum = spectrum_data;
 }
