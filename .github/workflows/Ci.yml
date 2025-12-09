@@ -11,28 +11,38 @@ env:
 
 jobs:
   build-and-test:
-    name: Build & Test on Self-Hosted
-    # Tells GitHub to use your local machine/runner instead of GitHub's cloud runners
+    name: Build, Test & Lint
     runs-on: self-hosted
 
     steps:
-      # 1. Fetch the source code from the repository
+      # 1. Checkout the repository content
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # 2. Verify Rust installation (Good practice to log the version being used)
+      # 2. Verify the Rust toolchain version
       - name: Ensure Rust toolchain
         run: rustup show
 
-      # 3. Quick syntax and dependency check (Compiles without producing the final binary, faster than build)
-      - name: Check code
-        run: cargo check --verbose
+      # 3. Check code formatting (style compliance)
+      - name: Check Formatting
+        run: cargo fmt -- --check
 
-      # 4. Run the project's test suite
+      # 4. Run Clippy linter to catch common mistakes and improve code quality
+      # Fails if any warnings are found (-D warnings)
+      - name: Run Clippy (Linting)
+        run: cargo clippy -- -D warnings
+
+      # 5. Run unit and integration tests
       - name: Run tests
-        # You can add --release if your tests are performance-heavy
         run: cargo test --verbose
 
-      # 5. Full Release Build (Ensures the final executable compiles correctly)
+      # 6. Build the project in release mode for optimized performance
       - name: Build Release
         run: cargo build --release --verbose
+
+      # 7. Upload the compiled binary as an artifact for download
+      - name: Upload Binary Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: rust-visualizer-linux
+          path: target/release/Rust_visualizer
