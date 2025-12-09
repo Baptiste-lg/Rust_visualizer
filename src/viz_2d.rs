@@ -53,6 +53,7 @@ fn despawn_scene(mut commands: Commands, scene_query: Query<Entity, With<Viz2DSc
 
 // Manages the bar chart by checking if the configuration has changed.
 // If the number of bands changes, it despawns the old bars and spawns new ones.
+#[allow(clippy::collapsible_if)]
 fn manage_bar_chart(
     mut commands: Commands,
     config: Res<VisualsConfig>,

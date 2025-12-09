@@ -140,6 +140,7 @@ fn spawn_visuals(
 
 // Updates the emissive property of each column's material based on audio amplitude.
 // This is a very fast operation as it only modifies a few material assets.
+#[allow(clippy::collapsible_if)]
 fn update_column_materials(
     audio_analysis: Res<AudioAnalysis>,
     config: Res<VisualsConfig>,

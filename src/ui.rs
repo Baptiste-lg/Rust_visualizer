@@ -89,6 +89,7 @@ fn setup_main_menu(mut commands: Commands) {
 }
 
 // Handles interactions with the main menu buttons.
+#[allow(clippy::type_complexity)]
 fn menu_button_interaction(
     mut button_query: Query<
         (&Interaction, &MenuButtonAction),
@@ -194,6 +195,7 @@ fn mic_selection_interaction(
 }
 
 // This system draws the main control panel for the visualizer using egui.
+#[allow(clippy::too_many_arguments)]
 fn visualizer_ui_system(
     mut contexts: EguiContexts,
     mut config: ResMut<VisualsConfig>,
@@ -367,6 +369,8 @@ fn visualizer_ui_system(
             selected_source.0 = AudioSource::Microphone;
         }
 
+        // --- CORRECTION: Allow collapsible if ---
+        #[allow(clippy::collapsible_if)]
         if ui.button("Choose Audio File").clicked() {
             if let Some(path) = rfd::FileDialog::new()
                 .add_filter("audio", &["mp3", "wav"])

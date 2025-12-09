@@ -226,6 +226,7 @@ pub struct AudioAnalysis {
 
 /// Manages the audio source. When the `SelectedAudioSource` resource
 /// changes, it stops the current audio, clears old state, and starts the new source.
+#[allow(clippy::too_many_arguments)]
 pub fn manage_audio_playback(
     mut commands: Commands,
     selected_source: Res<SelectedAudioSource>,
@@ -335,6 +336,7 @@ pub fn manage_audio_playback(
 }
 
 /// Applies changes from the UI (play, pause, speed, seek) to the `rodio` audio sink.
+#[allow(clippy::collapsible_if)]
 fn apply_playback_changes(
     mut playback_info: ResMut<PlaybackInfo>,
     sink: NonSend<Sink>,
@@ -474,6 +476,7 @@ pub fn read_mic_data_system(
 
 /// Performs the Fast Fourier Transform (FFT) on buffered audio samples
 /// to get frequency data for the visualizations.
+#[allow(clippy::too_many_arguments)]
 pub fn audio_analysis_system(
     time: Res<Time>,
     mut analysis_timer: ResMut<AnalysisTimer>,
@@ -592,10 +595,12 @@ pub fn audio_analysis_system(
         audio_analysis.frequency_bins.resize(num_bands, 0.0);
     }
 
-    for i in 0..num_bands {
+    // --- CORRECTION: Use iterator instead of range loop ---
+    for (i, bin_val) in new_bins.iter().take(num_bands).enumerate() {
         audio_analysis.frequency_bins[i] =
-            audio_analysis.frequency_bins[i] * smoothing + new_bins[i] * (1.0 - smoothing);
+            audio_analysis.frequency_bins[i] * smoothing + bin_val * (1.0 - smoothing);
     }
+
     audio_analysis.treble_average =
         audio_analysis.treble_average * smoothing + treble_val * (1.0 - smoothing);
 

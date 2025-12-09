@@ -107,7 +107,8 @@ fn deform_orb(
                     continue;
                 }
 
-                for i in 0..vertex_data.len() {
+                // --- CORRECTION: Use enumerated iterator for better performance/safety ---
+                for (i, pos) in vertex_data.iter_mut().enumerate() {
                     let original_pos = Vec3::from_array(orb.original_vertices[i]);
                     let normalized_pos = original_pos.normalize();
 
@@ -128,7 +129,9 @@ fn deform_orb(
                     // Displace the vertex along its normal based on the noise value and bass amplitude.
                     let displacement = noise_value * total_bass_amplitude * config.bass_sensitivity;
                     let new_pos = original_pos + normalized_pos * displacement;
-                    vertex_data[i] = new_pos.into();
+
+                    // Assign the new position
+                    *pos = new_pos.into();
                 }
             }
 
