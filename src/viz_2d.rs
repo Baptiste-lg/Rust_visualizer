@@ -1,6 +1,6 @@
 // src/viz_2d.rs
 
-use crate::{audio::AudioAnalysis, config::VisualsConfig, AppState, VisualizationEnabled};
+use crate::{AppState, VisualizationEnabled, audio::AudioAnalysis, config::VisualsConfig};
 use bevy::prelude::*;
 
 pub struct Viz2DPlugin;
@@ -22,10 +22,7 @@ impl Plugin for Viz2DPlugin {
             .add_systems(OnEnter(AppState::Visualization2D), setup_2d_scene)
             .add_systems(
                 Update,
-                (
-                    manage_bar_chart,
-                    update_2d_visuals.after(manage_bar_chart),
-                )
+                (manage_bar_chart, update_2d_visuals.after(manage_bar_chart))
                     .run_if(in_state(AppState::Visualization2D))
                     .run_if(|viz_enabled: Res<VisualizationEnabled>| viz_enabled.0),
             )

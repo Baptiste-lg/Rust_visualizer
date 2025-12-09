@@ -1,11 +1,11 @@
 // src/audio.rs
 
-use crate::{config::VisualsConfig, AppState, VisualizationEnabled};
+use crate::{AppState, VisualizationEnabled, config::VisualsConfig};
 use bevy::prelude::*;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use rodio::{source::Source, Decoder, Sink};
+use rodio::{Decoder, Sink, source::Source};
 use spectrum_analyzer::{
-    samples_fft_to_spectrum, scaling::divide_by_N_sqrt, windows::hann_window, FrequencyLimit,
+    FrequencyLimit, samples_fft_to_spectrum, scaling::divide_by_N_sqrt, windows::hann_window,
 };
 use std::collections::VecDeque;
 use std::io::Cursor;
@@ -249,10 +249,7 @@ pub fn manage_audio_playback(
 
     match &selected_source.0 {
         AudioSource::File(path) => {
-            info!(
-                "Audio source changed. Attempting to load file: {:?}",
-                path
-            );
+            info!("Audio source changed. Attempting to load file: {:?}", path);
 
             let duration = match get_duration_with_symphonia(path) {
                 Ok(d) => {
@@ -260,7 +257,10 @@ pub fn manage_audio_playback(
                     d
                 }
                 Err(e) => {
-                    error!("❌ Failed to get duration with Symphonia: {}. The progress bar will be incorrect.", e);
+                    error!(
+                        "❌ Failed to get duration with Symphonia: {}. The progress bar will be incorrect.",
+                        e
+                    );
                     Duration::ZERO
                 }
             };
@@ -520,7 +520,9 @@ pub fn audio_analysis_system(
         AudioSource::None => None,
     };
 
-    let Some(samples_slice) = analysis_buffer else { return };
+    let Some(samples_slice) = analysis_buffer else {
+        return;
+    };
 
     // Apply a Hann window to the samples to reduce spectral leakage, which is an
     // artifact of FFT on non-periodic signals.
@@ -531,7 +533,7 @@ pub fn audio_analysis_system(
         &hann_window,
         audio_info.sample_rate,
         FrequencyLimit::Range(20.0, 20000.0), // Human hearing range
-        Some(&divide_by_N_sqrt), // Scaling function
+        Some(&divide_by_N_sqrt),              // Scaling function
     )
     .expect("Failed to compute spectrum");
 
@@ -539,8 +541,11 @@ pub fn audio_analysis_system(
     let squared_sum = samples_slice.iter().map(|s| s * s).sum::<f32>();
     audio_analysis.volume = (squared_sum / samples_slice.len() as f32).sqrt();
 
-    let spectrum_data: Vec<(f32, f32)> =
-        spectrum.data().iter().map(|(f, v)| (f.val(), v.val())).collect();
+    let spectrum_data: Vec<(f32, f32)> = spectrum
+        .data()
+        .iter()
+        .map(|(f, v)| (f.val(), v.val()))
+        .collect();
 
     // Calculate spectral flux: the rate of change in the spectrum's magnitude.
     // This can be used to detect transients or "beat" changes in the music.
@@ -595,14 +600,22 @@ pub fn audio_analysis_system(
         audio_analysis.treble_average * smoothing + treble_val * (1.0 - smoothing);
 
     // Calculate simplified bass, mid, and treble values for easier use in visualizations.
-    audio_analysis.bass = audio_analysis.frequency_bins.iter().take(num_bands / 4).sum();
+    audio_analysis.bass = audio_analysis
+        .frequency_bins
+        .iter()
+        .take(num_bands / 4)
+        .sum();
     audio_analysis.mid = audio_analysis
         .frequency_bins
         .iter()
         .skip(num_bands / 4)
         .take(num_bands / 2)
         .sum();
-    audio_analysis.treble = audio_analysis.frequency_bins.iter().skip(3 * num_bands / 4).sum();
+    audio_analysis.treble = audio_analysis
+        .frequency_bins
+        .iter()
+        .skip(3 * num_bands / 4)
+        .sum();
 
     // Store the current spectrum for the next frame's flux calculation.
     audio_analysis.previous_spectrum = spectrum_data;

@@ -65,8 +65,7 @@ fn main() {
     // These are `NonSend` resources because they need to stay on the main thread.
     let (stream, stream_handle) = OutputStream::try_default().unwrap();
 
-    app
-        .add_plugins(DefaultPlugins)
+    app.add_plugins(DefaultPlugins)
         // Insert audio resources required for playback and analysis.
         .insert_non_send_resource(stream)
         .insert_non_send_resource(Sink::try_new(&stream_handle).unwrap())

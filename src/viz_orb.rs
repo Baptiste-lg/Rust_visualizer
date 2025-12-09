@@ -1,6 +1,6 @@
 // src/viz_orb.rs
 
-use crate::{audio::AudioAnalysis, config::VisualsConfig, AppState, VisualizationEnabled};
+use crate::{AppState, VisualizationEnabled, audio::AudioAnalysis, config::VisualsConfig};
 use bevy::{
     prelude::*,
     render::mesh::{Mesh, VertexAttributeValues},
@@ -113,7 +113,8 @@ fn deform_orb(
 
                     // Influence the noise with time and treble from the audio.
                     let time_val = time.elapsed_seconds() * config.orb_noise_speed;
-                    let treble_factor = 1.0 + audio_analysis.treble_average * config.orb_treble_influence;
+                    let treble_factor =
+                        1.0 + audio_analysis.treble_average * config.orb_treble_influence;
                     let noise_frequency = config.orb_noise_frequency * treble_factor;
 
                     // Sample the 3D Perlin noise function.

@@ -1,8 +1,6 @@
 // src/viz_disc.rs
 
-use crate::{
-    audio::AudioAnalysis, camera::MainCamera2D, config::VisualsConfig, AppState,
-};
+use crate::{AppState, audio::AudioAnalysis, camera::MainCamera2D, config::VisualsConfig};
 use bevy::{
     prelude::*,
     reflect::TypePath,
@@ -112,7 +110,9 @@ fn update_disc_material(
     // Query for the 2D camera to get its projection scale (zoom level).
     q_camera: Query<&OrthographicProjection, With<MainCamera2D>>,
 ) {
-    let Ok(window) = q_window.get_single() else { return };
+    let Ok(window) = q_window.get_single() else {
+        return;
+    };
     let window_resolution = Vec2::new(window.width(), window.height());
 
     // Get the current zoom level from the camera's orthographic projection.

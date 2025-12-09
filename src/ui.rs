@@ -8,7 +8,7 @@ use crate::{ActiveVisualization, AppState, VisualizationEnabled};
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 use bevy_egui::egui::color_picker;
-use bevy_egui::{egui, EguiContexts, EguiSet};
+use bevy_egui::{EguiContexts, EguiSet, egui};
 use cpal::traits::{DeviceTrait, HostTrait};
 use std::time::Duration;
 
@@ -90,7 +90,10 @@ fn setup_main_menu(mut commands: Commands) {
 
 // Handles interactions with the main menu buttons.
 fn menu_button_interaction(
-    mut button_query: Query<(&Interaction, &MenuButtonAction), (Changed<Interaction>, With<Button>)>,
+    mut button_query: Query<
+        (&Interaction, &MenuButtonAction),
+        (Changed<Interaction>, With<Button>),
+    >,
     mut next_app_state: ResMut<NextState<AppState>>,
     active_viz: Res<ActiveVisualization>,
 ) {
@@ -231,8 +234,11 @@ fn visualizer_ui_system(
             ui.heading("Disc Controls");
 
             ui.label("Disc Color");
-            let mut color_temp_disc =
-                [config.disc_color.r(), config.disc_color.g(), config.disc_color.b()];
+            let mut color_temp_disc = [
+                config.disc_color.r(),
+                config.disc_color.g(),
+                config.disc_color.b(),
+            ];
             if color_picker::color_edit_button_rgb(ui, &mut color_temp_disc).changed() {
                 config.disc_color =
                     Color::rgb(color_temp_disc[0], color_temp_disc[1], color_temp_disc[2]);
@@ -242,7 +248,10 @@ fn visualizer_ui_system(
             ui.add(egui::Slider::new(&mut config.disc_radius, 0.1..=2.0));
 
             ui.label("Line Thickness");
-            ui.add(egui::Slider::new(&mut config.disc_line_thickness, 0.01..=0.5));
+            ui.add(egui::Slider::new(
+                &mut config.disc_line_thickness,
+                0.01..=0.5,
+            ));
 
             ui.label("Iterations");
             ui.add(egui::Slider::new(&mut config.disc_iterations, 1..=50));
@@ -301,9 +310,15 @@ fn visualizer_ui_system(
             ui.label("Noise Speed");
             ui.add(egui::Slider::new(&mut config.orb_noise_speed, 0.1..=5.0));
             ui.label("Noise Frequency");
-            ui.add(egui::Slider::new(&mut config.orb_noise_frequency, 0.5..=10.0));
+            ui.add(egui::Slider::new(
+                &mut config.orb_noise_frequency,
+                0.5..=10.0,
+            ));
             ui.label("Treble Influence");
-            ui.add(egui::Slider::new(&mut config.orb_treble_influence, 0.0..=1.0));
+            ui.add(egui::Slider::new(
+                &mut config.orb_treble_influence,
+                0.0..=1.0,
+            ));
         }
 
         ui.separator();
@@ -332,8 +347,7 @@ fn visualizer_ui_system(
                     config.bloom_color.g(),
                     config.bloom_color.b(),
                 ];
-                if color_picker::color_edit_button_rgb(ui, &mut color_temp_bloom).changed()
-                {
+                if color_picker::color_edit_button_rgb(ui, &mut color_temp_bloom).changed() {
                     config.bloom_color = Color::rgb(
                         color_temp_bloom[0],
                         color_temp_bloom[1],

@@ -1,6 +1,6 @@
 // src/camera.rs
 
-use crate::{config::VisualsConfig, AppState};
+use crate::{AppState, config::VisualsConfig};
 use bevy::{
     core_pipeline::bloom::BloomSettings,
     input::mouse::{MouseMotion, MouseWheel},
@@ -47,8 +47,10 @@ impl Plugin for CameraPlugin {
             .add_systems(OnExit(AppState::VisualizationOrb), despawn_3d_camera)
             .add_systems(
                 Update,
-                (pan_orbit_camera, update_bloom_settings)
-                    .run_if(in_state(AppState::Visualization3D).or_else(in_state(AppState::VisualizationOrb))),
+                (pan_orbit_camera, update_bloom_settings).run_if(
+                    in_state(AppState::Visualization3D)
+                        .or_else(in_state(AppState::VisualizationOrb)),
+                ),
             )
             // Systems for the 2D camera
             .add_systems(OnEnter(AppState::Visualization2D), setup_2d_camera)
@@ -58,7 +60,8 @@ impl Plugin for CameraPlugin {
             .add_systems(
                 Update,
                 control_2d_camera.run_if(
-                    in_state(AppState::Visualization2D).or_else(in_state(AppState::VisualizationDisc)),
+                    in_state(AppState::Visualization2D)
+                        .or_else(in_state(AppState::VisualizationDisc)),
                 ),
             );
     }
@@ -194,7 +197,9 @@ fn pan_orbit_camera(
         return;
     }
 
-    let Ok(window) = primary_window.get_single() else { return };
+    let Ok(window) = primary_window.get_single() else {
+        return;
+    };
 
     if let Ok((mut pan_orbit, mut transform)) = query.get_single_mut() {
         if !pan_orbit.enabled {

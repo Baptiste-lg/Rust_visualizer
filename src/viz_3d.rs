@@ -1,6 +1,6 @@
 // src/viz_3d.rs
 
-use crate::{audio::AudioAnalysis, config::VisualsConfig, AppState, VisualizationEnabled};
+use crate::{AppState, VisualizationEnabled, audio::AudioAnalysis, config::VisualsConfig};
 use bevy::prelude::*;
 
 pub struct Viz3DPlugin;
@@ -187,7 +187,8 @@ fn update_cube_transforms(
             // Scale the cube's height based on the amplitude of its frequency band.
             let target_scale = 1.0 + band_amplitude * config.bass_sensitivity;
             // Apply smoothing for a more fluid motion.
-            transform.scale.y = transform.scale.y + (target_scale - transform.scale.y) * smoothing_factor;
+            transform.scale.y =
+                transform.scale.y + (target_scale - transform.scale.y) * smoothing_factor;
 
             // If the spread effect is enabled, move the cubes outwards based on treble.
             if config.spread_enabled {
