@@ -44,5 +44,5 @@ jobs:
       - name: Upload Binary Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: rust-visualizer-linux
-          path: target/release/Rust_visualizer
+          name: rust-visualizer-windows
+          path: target/release/Rust_visualizer.exe
