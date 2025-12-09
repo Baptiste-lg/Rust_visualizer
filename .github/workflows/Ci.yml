@@ -1,0 +1,38 @@
+﻿name: Rust Visualizer CI
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  pull_request:
+    branches: [ "main", "master" ]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build-and-test:
+    name: Build & Test on Self-Hosted
+    # Tells GitHub to use your local machine/runner instead of GitHub's cloud runners
+    runs-on: self-hosted
+
+    steps:
+      # 1. Fetch the source code from the repository
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # 2. Verify Rust installation (Good practice to log the version being used)
+      - name: Ensure Rust toolchain
+        run: rustup show
+
+      # 3. Quick syntax and dependency check (Compiles without producing the final binary, faster than build)
+      - name: Check code
+        run: cargo check --verbose
+
+      # 4. Run the project's test suite
+      - name: Run tests
+        # You can add --release if your tests are performance-heavy
+        run: cargo test --verbose
+
+      # 5. Full Release Build (Ensures the final executable compiles correctly)
+      - name: Build Release
+        run: cargo build --release --verbose
