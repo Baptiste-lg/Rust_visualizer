@@ -50,13 +50,19 @@ impl Plugin for CameraPlugin {
             // Systems for the 2D camera
             .add_systems(OnEnter(AppState::Visualization2D), setup_2d_camera)
             .add_systems(OnEnter(AppState::VisualizationDisc), setup_2d_camera)
+            // AJOUT ICI : On active la caméra 2D pour le mode Ico
+            .add_systems(OnEnter(AppState::VisualizationIco), setup_2d_camera)
             .add_systems(OnExit(AppState::Visualization2D), despawn_2d_camera)
             .add_systems(OnExit(AppState::VisualizationDisc), despawn_2d_camera)
+            // AJOUT ICI : On nettoie la caméra en sortant
+            .add_systems(OnExit(AppState::VisualizationIco), despawn_2d_camera)
             .add_systems(
                 Update,
                 control_2d_camera.run_if(
                     in_state(AppState::Visualization2D)
-                        .or_else(in_state(AppState::VisualizationDisc)),
+                        .or_else(in_state(AppState::VisualizationDisc))
+                        // AJOUT (Optionnel) : Si tu veux le zoom/scroll aussi sur l'Ico
+                        .or_else(in_state(AppState::VisualizationIco)),
                 ),
             );
     }

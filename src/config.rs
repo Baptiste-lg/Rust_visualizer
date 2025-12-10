@@ -40,6 +40,11 @@ pub struct VisualsConfig {
     pub disc_iterations: i32,
     pub disc_speed: f32,
     pub disc_center_radius_factor: f32,
+
+    // --- Ico Visualizer Settings ---
+    // Ajouté pour contrôler le nouveau shader
+    pub ico_speed: f32,
+    pub ico_color: Color,
 }
 
 impl Default for VisualsConfig {
@@ -79,6 +84,10 @@ impl Default for VisualsConfig {
             disc_iterations: 35,
             disc_speed: 1.0,
             disc_center_radius_factor: 1.0,
+
+            // --- Ico Visualizer Defaults ---
+            ico_speed: 0.5,                       // Une vitesse modérée par défaut
+            ico_color: Color::rgb(0.5, 0.8, 0.9), // Un bleu métallique sympa
         }
     }
 }
