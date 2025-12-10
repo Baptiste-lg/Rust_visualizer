@@ -1,5 +1,3 @@
-// src/camera.rs
-
 use crate::{AppState, config::VisualsConfig};
 use bevy::{
     core_pipeline::bloom::BloomSettings,
@@ -11,15 +9,12 @@ use bevy_egui::EguiContexts;
 
 pub struct CameraPlugin;
 
-// A marker component for the main 3D camera.
 #[derive(Component)]
 pub struct MainCamera3D;
 
-// A marker component for the main 2D camera.
 #[derive(Component)]
 pub struct MainCamera2D;
 
-// A component that enables pan-and-orbit camera controls.
 #[derive(Component)]
 pub struct PanOrbitController {
     pub focus: Vec3,
@@ -67,7 +62,6 @@ impl Plugin for CameraPlugin {
     }
 }
 
-// Spawns the 3D camera and a point light when entering a 3D visualization state.
 fn setup_3d_camera(mut commands: Commands) {
     let initial_transform = Transform::from_xyz(0.0, 0.0, 15.0).looking_at(Vec3::ZERO, Vec3::Y);
 
@@ -75,7 +69,7 @@ fn setup_3d_camera(mut commands: Commands) {
         Camera3dBundle {
             transform: initial_transform,
             camera: Camera {
-                hdr: true, // Enable High Dynamic Range for bloom effects.
+                hdr: true,
                 ..default()
             },
             ..default()
@@ -85,7 +79,6 @@ fn setup_3d_camera(mut commands: Commands) {
         MainCamera3D,
     ));
 
-    // Add a default light to the scene.
     commands.spawn(PointLightBundle {
         point_light: PointLight {
             intensity: 2000.0,
@@ -97,7 +90,6 @@ fn setup_3d_camera(mut commands: Commands) {
     });
 }
 
-// Despawns the 3D camera and light when exiting a 3D visualization state.
 fn despawn_3d_camera(
     mut commands: Commands,
     camera_query: Query<Entity, With<MainCamera3D>>,
@@ -111,20 +103,16 @@ fn despawn_3d_camera(
     }
 }
 
-// Spawns the 2D camera when entering a 2D visualization state.
 fn setup_2d_camera(mut commands: Commands) {
     commands.spawn((Camera2dBundle::default(), MainCamera2D));
 }
 
-// Despawns the 2D camera when exiting a 2D visualization state.
 fn despawn_2d_camera(mut commands: Commands, camera_query: Query<Entity, With<MainCamera2D>>) {
     if let Ok(entity) = camera_query.get_single() {
         commands.entity(entity).despawn_recursive();
     }
 }
 
-// Updates the camera's bloom settings based on the configuration.
-// This will add or remove the `BloomSettings` component as needed.
 fn update_bloom_settings(
     config: Res<VisualsConfig>,
     mut camera_query: Query<(Entity, Option<&mut BloomSettings>), With<MainCamera3D>>,
@@ -134,12 +122,10 @@ fn update_bloom_settings(
         if config.bloom_enabled {
             match bloom_settings {
                 Some(mut settings) => {
-                    // Update existing bloom settings.
                     settings.intensity = config.bloom_intensity;
                     settings.prefilter_settings.threshold = config.bloom_threshold;
                 }
                 None => {
-                    // Add bloom settings if they don't exist.
                     commands.entity(camera_entity).insert(BloomSettings {
                         intensity: config.bloom_intensity,
                         prefilter_settings: bevy::core_pipeline::bloom::BloomPrefilterSettings {
@@ -150,22 +136,17 @@ fn update_bloom_settings(
                     });
                 }
             }
-        } else {
-            // Remove bloom settings if disabled.
-            if bloom_settings.is_some() {
-                commands.entity(camera_entity).remove::<BloomSettings>();
-            }
+        } else if bloom_settings.is_some() {
+            commands.entity(camera_entity).remove::<BloomSettings>();
         }
     }
 }
 
-// Controls the zoom level of the 2D camera using the mouse wheel.
 fn control_2d_camera(
     mut ev_scroll: EventReader<MouseWheel>,
     mut camera_query: Query<&mut OrthographicProjection, With<MainCamera2D>>,
     mut contexts: EguiContexts,
 ) {
-    // Ignore scroll events if the mouse is over a UI element.
     if contexts.ctx_mut().is_pointer_over_area() || contexts.ctx_mut().wants_pointer_input() {
         ev_scroll.clear();
         return;
@@ -173,14 +154,13 @@ fn control_2d_camera(
 
     if let Ok(mut projection) = camera_query.get_single_mut() {
         for ev in ev_scroll.read() {
-            projection.scale -= ev.y * 0.1;
+            // Safer logic to prevent projection inverting
+            let new_scale = projection.scale - ev.y * 0.1;
+            projection.scale = new_scale.max(0.1);
         }
-        // Prevent zooming in too far.
-        projection.scale = projection.scale.max(0.1);
     }
 }
 
-// Implements the pan-and-orbit controls for the 3D camera.
 fn pan_orbit_camera(
     primary_window: Query<&Window, With<PrimaryWindow>>,
     mut ev_motion: EventReader<MouseMotion>,
@@ -190,7 +170,6 @@ fn pan_orbit_camera(
     mut contexts: EguiContexts,
 ) {
     let ctx = contexts.ctx_mut();
-    // Ignore mouse events if the mouse is over a UI element.
     if ctx.is_pointer_over_area() || ctx.wants_pointer_input() {
         ev_motion.clear();
         ev_scroll.clear();
@@ -206,7 +185,6 @@ fn pan_orbit_camera(
             return;
         }
 
-        // Handle rotation with the left mouse button.
         if input_mouse.pressed(MouseButton::Left) {
             let mut rotation = Vec2::ZERO;
             for ev in ev_motion.read() {
@@ -223,7 +201,6 @@ fn pan_orbit_camera(
             }
         }
 
-        // Handle zoom with the mouse wheel.
         let mut scroll = 0.0;
         for ev in ev_scroll.read() {
             scroll += ev.y;
@@ -232,7 +209,6 @@ fn pan_orbit_camera(
             pan_orbit.radius = (pan_orbit.radius - scroll * pan_orbit.radius * 0.1).max(5.0);
         }
 
-        // Update the camera's position based on the new rotation and radius.
         let rot_matrix = Mat3::from_quat(transform.rotation);
         transform.translation =
             pan_orbit.focus + rot_matrix.mul_vec3(Vec3::new(0.0, 0.0, pan_orbit.radius));

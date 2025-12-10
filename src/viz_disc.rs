@@ -1,5 +1,3 @@
-// src/viz_disc.rs
-
 use crate::{AppState, audio::AudioAnalysis, camera::MainCamera2D, config::VisualsConfig};
 use bevy::{
     prelude::*,
@@ -23,47 +21,53 @@ impl Plugin for VizDiscPlugin {
     }
 }
 
-// A marker component for the disc visualization scene.
 #[derive(Component)]
 struct DiscScene;
 
-// The custom material for the 2D disc visualizer.
-// The `#[uniform(0)]` attribute makes these fields available to the shader.
+// Ajout de #[repr(C)] pour garantir que l'ordre des champs en mémoire
+// correspond exactement à l'ordre déclaré, comme dans le shader WGSL.
 #[derive(Asset, AsBindGroup, TypePath, Debug, Clone)]
+#[repr(C)]
 pub struct DiscMaterial {
     #[uniform(0)]
-    color: Color,
+    color: Vec4, // 16 bytes (offset 0)
     #[uniform(0)]
-    time: f32,
+    time: f32, // 4 bytes  (offset 16)
     #[uniform(0)]
-    radius: f32,
+    radius: f32, // 4 bytes  (offset 20)
     #[uniform(0)]
-    line_thickness: f32,
+    line_thickness: f32, // 4 bytes  (offset 24)
     #[uniform(0)]
-    iterations: f32,
+    iterations: f32, // 4 bytes  (offset 28)
     #[uniform(0)]
-    speed: f32,
+    speed: f32, // 4 bytes  (offset 32)
     #[uniform(0)]
-    center_radius_factor: f32,
+    center_radius_factor: f32, // 4 bytes (offset 36)
     #[uniform(0)]
-    resolution: Vec2,
+    resolution: Vec2, // 8 bytes  (offset 40) - Aligné sur 8 bytes, OK.
     #[uniform(0)]
-    bass: f32,
+    bass: f32, // 4 bytes  (offset 48)
     #[uniform(0)]
-    flux: f32,
+    flux: f32, // 4 bytes  (offset 52)
     #[uniform(0)]
-    zoom: f32, // Passes the camera zoom level to the shader.
+    zoom: f32, // 4 bytes  (offset 56)
+    // TOTAL ACTUEL: 60 bytes.
+    // WGPU préfère souvent un alignement sur 16 bytes pour les Uniform buffers.
+    // On ajoute un padding explicite pour monter à 64 bytes.
+    #[uniform(0)]
+    _padding: f32, // 4 bytes  (offset 60 -> 64)
 }
 
 impl Material2d for DiscMaterial {
-    // Specifies the fragment shader that will be used to render this material.
     fn fragment_shader() -> ShaderRef {
         "shaders/disc_shader.wgsl".into()
     }
 }
 
-// Sets up the scene for the disc visualizer. This involves creating a large quad
-// that covers the entire screen and applying our custom `DiscMaterial` to it.
+fn color_to_vec4(color: Color) -> Vec4 {
+    Vec4::from(color.as_linear_rgba_f32())
+}
+
 fn setup_disc_scene(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -72,26 +76,25 @@ fn setup_disc_scene(
 ) {
     let quad_handle = meshes.add(Rectangle::new(1.0, 1.0));
 
-    // Create an instance of our custom material with default values.
     let material_handle = materials.add(DiscMaterial {
-        color: config.disc_color,
+        color: color_to_vec4(config.disc_color),
         time: 0.0,
         radius: config.disc_radius,
         line_thickness: config.disc_line_thickness,
         iterations: config.disc_iterations as f32,
         speed: config.disc_speed,
         center_radius_factor: config.disc_center_radius_factor,
-        resolution: Vec2::new(800.0, 600.0), // Initial resolution, will be updated.
+        resolution: Vec2::new(800.0, 600.0),
         bass: 0.0,
         flux: 0.0,
-        zoom: 1.0, // Initial zoom is 1.0 (no zoom).
+        zoom: 1.0,
+        _padding: 0.0, // On initialise le padding
     });
 
     commands.spawn((
         MaterialMesh2dBundle {
             mesh: quad_handle.into(),
             material: material_handle,
-            // Scale the quad to be enormous, ensuring it covers the screen.
             transform: Transform::from_scale(Vec3::splat(1_000_000.0)),
             ..default()
         },
@@ -99,15 +102,12 @@ fn setup_disc_scene(
     ));
 }
 
-// Updates the properties of the `DiscMaterial` every frame.
-// This passes real-time data like audio analysis and time to the shader.
 fn update_disc_material(
     time: Res<Time>,
     config: Res<VisualsConfig>,
     audio_analysis: Res<AudioAnalysis>,
     mut materials: ResMut<Assets<DiscMaterial>>,
     q_window: Query<&Window, With<PrimaryWindow>>,
-    // Query for the 2D camera to get its projection scale (zoom level).
     q_camera: Query<&OrthographicProjection, With<MainCamera2D>>,
 ) {
     let Ok(window) = q_window.get_single() else {
@@ -115,17 +115,15 @@ fn update_disc_material(
     };
     let window_resolution = Vec2::new(window.width(), window.height());
 
-    // Get the current zoom level from the camera's orthographic projection.
     let zoom_level = if let Ok(projection) = q_camera.get_single() {
         projection.scale
     } else {
-        1.0 // Default to 1.0 if the camera isn't found.
+        1.0
     };
 
-    // Iterate over all instances of our material and update their properties.
     for (_, material) in materials.iter_mut() {
         material.time = time.elapsed_seconds();
-        material.color = config.disc_color;
+        material.color = color_to_vec4(config.disc_color);
         material.radius = config.disc_radius;
         material.line_thickness = config.disc_line_thickness;
         material.iterations = config.disc_iterations as f32;
@@ -134,12 +132,11 @@ fn update_disc_material(
         material.resolution = window_resolution;
         material.bass = audio_analysis.bass;
         material.flux = audio_analysis.flux;
-        // Pass the updated zoom level to the material.
         material.zoom = zoom_level;
+        // Pas besoin d'update _padding
     }
 }
 
-// Despawns the disc scene when exiting the `VisualizationDisc` state.
 fn despawn_scene(mut commands: Commands, scene_query: Query<Entity, With<DiscScene>>) {
     if let Ok(entity) = scene_query.get_single() {
         commands.entity(entity).despawn_recursive();
