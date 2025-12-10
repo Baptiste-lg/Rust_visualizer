@@ -8,7 +8,8 @@ mod ui;
 mod viz_2d;
 mod viz_3d;
 mod viz_disc;
-mod viz_orb;
+mod viz_ico;
+mod viz_orb; // <--- AJOUT : Déclaration du module
 
 // --- Plugin Imports ---
 use crate::audio::{AudioPlugin, MicStream, PlaybackInfo, SelectedAudioSource};
@@ -18,7 +19,9 @@ use crate::ui::UiPlugin;
 use crate::viz_2d::Viz2DPlugin;
 use crate::viz_3d::Viz3DPlugin;
 use crate::viz_disc::VizDiscPlugin;
-use crate::viz_orb::VizOrbPlugin;
+use crate::viz_ico::VizIcoPlugin;
+use crate::viz_orb::VizOrbPlugin; // <--- AJOUT : Import du plugin
+
 use bevy::prelude::*;
 use bevy_egui::EguiPlugin;
 use rodio::{OutputStream, Sink};
@@ -34,6 +37,7 @@ pub enum AppState {
     Visualization2D,
     VisualizationOrb,
     VisualizationDisc,
+    VisualizationIco, // <--- AJOUT : Nouvel état pour le shader Ico
 }
 
 // A resource to keep track of the last active visualization.
@@ -66,6 +70,7 @@ fn main() {
     let (stream, stream_handle) = OutputStream::try_default().unwrap();
 
     app.add_plugins(DefaultPlugins)
+        .insert_resource(ClearColor(Color::GRAY)) // <--- AJOUTE CECI
         // Insert audio resources required for playback and analysis.
         .insert_non_send_resource(stream)
         .insert_non_send_resource(Sink::try_new(&stream_handle).unwrap())
@@ -87,6 +92,7 @@ fn main() {
             VizOrbPlugin,
             CameraPlugin,
             VizDiscPlugin,
+            VizIcoPlugin, // <--- AJOUT : Activation du plugin
         ))
         .run();
 }

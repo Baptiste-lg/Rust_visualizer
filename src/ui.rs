@@ -40,7 +40,9 @@ impl Plugin for UiPlugin {
                         in_state(AppState::Visualization2D)
                             .or_else(in_state(AppState::Visualization3D))
                             .or_else(in_state(AppState::VisualizationOrb))
-                            .or_else(in_state(AppState::VisualizationDisc)),
+                            .or_else(in_state(AppState::VisualizationDisc))
+                            // AJOUT : On active l'UI pour le mode Ico
+                            .or_else(in_state(AppState::VisualizationIco)),
                     ),
             );
     }
@@ -323,6 +325,26 @@ fn visualizer_ui_system(
             ));
         }
 
+        // AJOUT : Contrôles spécifiques pour le visualiseur Ico
+        if *current_state == AppState::VisualizationIco {
+            ui.separator();
+            ui.heading("Icosahedron Controls");
+
+            ui.label("Color Tint");
+            let mut color_temp_ico = [
+                config.ico_color.r(),
+                config.ico_color.g(),
+                config.ico_color.b(),
+            ];
+            if color_picker::color_edit_button_rgb(ui, &mut color_temp_ico).changed() {
+                config.ico_color =
+                    Color::rgb(color_temp_ico[0], color_temp_ico[1], color_temp_ico[2]);
+            }
+
+            ui.label("Rotation Speed");
+            ui.add(egui::Slider::new(&mut config.ico_speed, -3.0..=3.0));
+        }
+
         ui.separator();
         let button_text = if viz_enabled.0 {
             "Deactivate Visualizer"
@@ -401,6 +423,11 @@ fn visualizer_ui_system(
         if ui.button("2D Disc").clicked() {
             next_app_state.set(AppState::VisualizationDisc);
             active_viz.0 = AppState::VisualizationDisc;
+        }
+        // AJOUT : Bouton pour sélectionner le visualiseur Ico
+        if ui.button("Ico Shader").clicked() {
+            next_app_state.set(AppState::VisualizationIco);
+            active_viz.0 = AppState::VisualizationIco;
         }
     });
 }
