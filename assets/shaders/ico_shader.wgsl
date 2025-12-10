@@ -3,16 +3,16 @@
 // --- 1. CONFIGURATION & UNIFORMS ---
 
 struct IcoMaterial {
-    color: vec4<f32>,            // Tint global venant de Bevy
-    resolution_mouse: vec4<f32>, // xy = resolution, zw = mouse
-    time_params: vec4<f32>,      // x = time, y = speed
+    color: vec4<f32>,            // Tint global
+    resolution_mouse: vec4<f32>, // xy = physical resolution, zw = mouse
+    time_params: vec4<f32>,      // x = time, y = speed, z = CAMERA ZOOM
 };
 
 @group(2) @binding(0)
 var<uniform> material: IcoMaterial;
 
 const PI: f32 = 3.14159265359;
-const MAX_TRACE_DISTANCE: f32 = 10.0;
+const MAX_TRACE_DISTANCE: f32 = 20.0; // Augmenté pour supporter le dézoom
 const INTERSECTION_PRECISION: f32 = 0.001;
 const NUM_OF_TRACE_STEPS: i32 = 100;
 
@@ -32,7 +32,6 @@ struct IcoBasis {
 // --- 3. MATH HELPERS ---
 
 fn saturate(x: f32) -> f32 { return clamp(x, 0.0, 1.0); }
-
 fn vmax(v: vec3<f32>) -> f32 { return max(max(v.x, v.y), v.z); }
 
 fn fPlane(p: vec3<f32>, n: vec3<f32>, dist: f32) -> f32 {
@@ -311,7 +310,6 @@ fn calcAO(pos: vec3<f32>, nor: vec3<f32>, basis: IcoBasis, t: f32) -> f32 {
     return clamp(1.0 - 3.0 * occ, 0.0, 1.0);
 }
 
-// FIX: Renamed 'ref' -> 'refl' because 'ref' is a reserved keyword in WGSL
 fn doLighting(col_in: vec3<f32>, pos: vec3<f32>, nor: vec3<f32>, refl: vec3<f32>, rd: vec3<f32>, basis: IcoBasis, t: f32) -> vec3<f32> {
     var col = col_in;
     let occ = calcAO(pos, nor, basis, t);
@@ -359,8 +357,6 @@ fn render_scene(res: vec2<f32>, ro: vec3<f32>, rd: vec3<f32>, basis: IcoBasis, t
     if (res.y > -0.5) {
         let pos = ro + rd * res.x;
         let nor = calcNormal(pos, basis, t);
-
-        // FIX: Variable name 'refl' here as well
         let refl = reflect(rd, nor);
 
         color = vec3<f32>(0.5);
@@ -386,15 +382,28 @@ fn fragment(mesh: VertexOutput) -> @location(0) vec4<f32> {
     t_val = (t_val / 4.0) - floor(t_val / 4.0);
 
     let resolution = material.resolution_mouse.xy;
-    let mouse = material.resolution_mouse.zw / resolution;
+    // CORRECTION : On ne divise plus par la resolution ici pour le mouse.
+    // On utilise directement le zoom envoyé par la caméra (paramètre Z)
+    let camera_zoom_scale = material.time_params.z;
 
     if (resolution.x == 0.0) { return vec4<f32>(0.0); }
 
-    let p = (-resolution.xy + 2.0 * mesh.position.xy) / resolution.y;
+    // CORRECTION CENTRAGE :
+    // mesh.position est en coordonnées pixel (0..Width, 0..Height).
+    // Pour centrer (0,0 au milieu), on fait (2*pos - res) / res.y
+    // Si la résolution passée en uniform (physique) correspond à mesh.position (physique),
+    // l'objet sera parfaitement au centre.
+    let p = (2.0 * mesh.position.xy - resolution.xy) / resolution.y;
     let p_corrected = vec2<f32>(p.x, -p.y);
 
     let orient = normalize(vec3<f32>(0.1, 1.0, 0.0));
-    var zoom = 4.0 - mouse.y * 3.5;
+
+    // CORRECTION ZOOM :
+    // Bevy Camera Scale : 1.0 = normal, 2.0 = dézoomé (l'objet est plus petit)
+    // Raymarching : ro (origine rayon) doit être plus loin pour voir l'objet plus petit.
+    // 4.0 est la distance de base. On multiplie par le scale de la caméra.
+    var zoom = 4.0 * camera_zoom_scale;
+
     let ro = zoom * orient;
     let ta = vec3<f32>(0.0);
 

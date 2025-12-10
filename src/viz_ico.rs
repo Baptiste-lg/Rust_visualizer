@@ -1,4 +1,4 @@
-use crate::{AppState, config::VisualsConfig};
+use crate::{AppState, config::VisualsConfig, camera::MainCamera2D}; // Ajout import camera
 use bevy::{
     prelude::*,
     reflect::TypePath,
@@ -24,10 +24,6 @@ impl Plugin for VizIcoPlugin {
 #[derive(Component)]
 struct IcoScene;
 
-// --- STRUCTURE BLINDÉE ---
-// On utilise uniquement des Vec4.
-// 1 Vec4 = 16 bytes. C'est l'alignement natif du GPU.
-// Plus aucun risque d'erreur de padding.
 #[derive(Asset, AsBindGroup, TypePath, Debug, Clone)]
 #[repr(C)]
 pub struct IcoMaterial {
@@ -36,7 +32,7 @@ pub struct IcoMaterial {
     #[uniform(0)]
     pub resolution_mouse: Vec4, // x=width, y=height, z=mouseX, w=mouseY
     #[uniform(0)]
-    pub time_params: Vec4, // x=time, y=speed, z=unused, w=unused
+    pub time_params: Vec4, // x=time, y=speed, z=ZOOM (camera scale), w=unused
 }
 
 impl Material2d for IcoMaterial {
@@ -55,16 +51,15 @@ fn setup_ico_scene(
 
     let material_handle = materials.add(IcoMaterial {
         color: Vec4::from(config.ico_color.as_linear_rgba_f32()),
-        // On initialise avec une résolution par défaut pour éviter la division par 0 au start
         resolution_mouse: Vec4::new(800.0, 600.0, 0.0, 0.0),
-        time_params: Vec4::new(0.0, config.ico_speed, 0.0, 0.0),
+        time_params: Vec4::new(0.0, config.ico_speed, 1.0, 0.0),
     });
 
     commands.spawn((
         MaterialMesh2dBundle {
             mesh: quad_handle.into(),
             material: material_handle,
-            // On s'assure que le quad est bien visible (Z=0.0) et couvre tout
+            // Le quad couvre tout l'écran
             transform: Transform::from_xyz(0.0, 0.0, 0.0).with_scale(Vec3::splat(10_000.0)),
             ..default()
         },
@@ -77,28 +72,43 @@ fn update_ico_material(
     config: Res<VisualsConfig>,
     mut materials: ResMut<Assets<IcoMaterial>>,
     q_window: Query<&Window, With<PrimaryWindow>>,
+    q_camera: Query<&OrthographicProjection, With<MainCamera2D>>, // On récupère la caméra
 ) {
     let Ok(window) = q_window.get_single() else {
         return;
     };
 
-    let width = window.width();
-    let height = window.height();
+    // CORRECTION MAJEURE : Utilisation de la résolution PHYSIQUE
+    // mesh.position dans le shader correspond aux pixels physiques.
+    // Si on envoie la taille logique (width/height), le shader décale tout sur les écrans HDPI.
+    let width = window.resolution.physical_width() as f32;
+    let height = window.resolution.physical_height() as f32;
+
+    // On récupère la souris (optionnel pour d'autres effets, mais plus pour le zoom)
     let mouse = window.cursor_position().unwrap_or(Vec2::ZERO);
+
+    // Récupération du zoom (scale) de la caméra contrôlé par la molette
+    let zoom_level = if let Ok(projection) = q_camera.get_single() {
+        projection.scale
+    } else {
+        1.0
+    };
 
     for (_, material) in materials.iter_mut() {
         material.color = Vec4::from(config.ico_color.as_linear_rgba_f32());
 
-        // On compacte les données dans les Vec4
         material.resolution_mouse = Vec4::new(
             width,
             height,
             mouse.x,
-            height - mouse.y, // Inversion Y pour Shadertoy
+            // On envoie la coordonnée Y inversée au cas où, mais moins critique ici
+            height - mouse.y,
         );
 
         material.time_params.x = time.elapsed_seconds();
         material.time_params.y = config.ico_speed;
+        // On injecte le zoom caméra dans le paramètre Z
+        material.time_params.z = zoom_level;
     }
 }
 
