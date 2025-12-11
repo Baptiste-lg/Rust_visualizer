@@ -373,7 +373,7 @@ fn color_picker_widget(ui: &mut egui::Ui, color: &mut Color) {
     // Note: Si tu es sur Bevy 0.14 strict, color.r() n'existe peut-être pas directement
     // mais si ton code compilait avant (hors egui), on suppose que ça passe ou que tu as un trait.
     // Sinon, utilise `color.to_linear().red` etc.
-    let mut rgba_array = [color.r(), color.g(), color.b(), color.a()];
+    let rgba_array = [color.r(), color.g(), color.b(), color.a()];
 
     // 2. Création d'une couleur Egui (Rgba est premultiplied par défaut)
     // On utilise from_rgba_unmultiplied car nos inputs sont linéaires/unmultiplied
