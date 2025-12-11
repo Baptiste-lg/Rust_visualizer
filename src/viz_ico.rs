@@ -51,7 +51,7 @@ fn setup_ico_scene(
 ) {
     let quad_handle = meshes.add(Rectangle::new(1.0, 1.0));
 
-    // Initialisation avec des valeurs par défaut
+    // Initialize with default values
     let material_handle = materials.add(IcoMaterial {
         color: Vec4::from(config.ico_color.as_linear_rgba_f32()),
         resolution_mouse: Vec4::new(800.0, 600.0, 0.0, 0.0),
@@ -63,7 +63,7 @@ fn setup_ico_scene(
         MaterialMesh2dBundle {
             mesh: quad_handle.into(),
             material: material_handle,
-            // Quad très grand pour couvrir l'écran
+            // Very large quad to cover the screen
             transform: Transform::from_xyz(0.0, 0.0, 0.0).with_scale(Vec3::splat(10_000.0)),
             ..default()
         },
@@ -93,10 +93,10 @@ fn update_ico_material(
         1.0
     };
 
-    // --- LOGIQUE DE SENSIBILITÉ ---
-    // On récupère la sensibilité de l'UI (par défaut 4.0)
-    // On multiplie par 0.05 (équivalent à diviser par 20) pour réduire drastiquement l'effet de base.
-    // Ainsi, à 4.0, on a un facteur de 0.2, ce qui est beaucoup plus doux.
+    // --- SENSITIVITY LOGIC ---
+    // Retrieve sensitivity from UI (default 4.0)
+    // Multiply by 0.05 (equivalent to dividing by 20) to drastically reduce the base effect.
+    // Thus, at 4.0, we have a factor of 0.2, which is much smoother.
     let sensitivity = config.bass_sensitivity * 0.03;
 
     for (_, material) in materials.iter_mut() {
@@ -108,7 +108,7 @@ fn update_ico_material(
         material.time_params.y = config.ico_speed;
         material.time_params.z = zoom_level;
 
-        // On applique le facteur 'sensitivity' à toutes les bandes
+        // Apply 'sensitivity' factor to all bands
         material.audio_params = Vec4::new(
             audio_analysis.bass * sensitivity,
             audio_analysis.mid * sensitivity,

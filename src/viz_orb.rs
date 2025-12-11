@@ -107,7 +107,6 @@ fn deform_orb(
                     continue;
                 }
 
-                // --- CORRECTION: Use enumerated iterator for better performance/safety ---
                 for (i, pos) in vertex_data.iter_mut().enumerate() {
                     let original_pos = Vec3::from_array(orb.original_vertices[i]);
                     let normalized_pos = original_pos.normalize();

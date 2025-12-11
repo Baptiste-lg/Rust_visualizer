@@ -24,7 +24,7 @@ impl Plugin for VizDiscPlugin {
 #[derive(Component)]
 struct DiscScene;
 
-// Ajout de #[repr(C)] pour garantir l'alignement mémoire avec le shader
+// Added #[repr(C)] to guarantee memory alignment with the shader
 #[derive(Asset, AsBindGroup, TypePath, Debug, Clone)]
 #[repr(C)]
 pub struct DiscMaterial {
@@ -72,7 +72,7 @@ fn setup_disc_scene(
 ) {
     let quad_handle = meshes.add(Rectangle::new(1.0, 1.0));
 
-    // On initialise avec des valeurs par défaut
+    // Initialize with default values
     let material_handle = materials.add(DiscMaterial {
         color: color_to_vec4(config.disc_color),
         time: 0.0,
@@ -81,7 +81,7 @@ fn setup_disc_scene(
         iterations: config.disc_iterations as f32,
         speed: config.disc_speed,
         center_radius_factor: config.disc_center_radius_factor,
-        resolution: Vec2::new(800.0, 600.0), // Valeur temporaire, mise à jour dans la boucle
+        resolution: Vec2::new(800.0, 600.0), // Temporary value, updated in the loop
         bass: 0.0,
         flux: 0.0,
         zoom: 1.0,
@@ -92,7 +92,7 @@ fn setup_disc_scene(
         MaterialMesh2dBundle {
             mesh: quad_handle.into(),
             material: material_handle,
-            // Quad très grand pour couvrir l'écran
+            // Very large quad to cover the screen
             transform: Transform::from_scale(Vec3::splat(1_000_000.0)),
             ..default()
         },
@@ -112,13 +112,13 @@ fn update_disc_material(
         return;
     };
 
-    // CORRECTION ICI : Utilisation de la résolution PHYSIQUE pour correspondre à frag_coord
+    // Use PHYSICAL resolution to match frag_coord
     let window_resolution = Vec2::new(
         window.resolution.physical_width() as f32,
         window.resolution.physical_height() as f32,
     );
 
-    // Récupération du zoom de la caméra (molette)
+    // Retrieve camera zoom (mouse wheel)
     let zoom_level = if let Ok(projection) = q_camera.get_single() {
         projection.scale
     } else {
@@ -137,7 +137,7 @@ fn update_disc_material(
         material.bass = audio_analysis.bass;
         material.flux = audio_analysis.flux;
         material.zoom = zoom_level;
-        // _padding n'a pas besoin d'être mis à jour
+        // _padding doesn't need to be updated
     }
 }
 
