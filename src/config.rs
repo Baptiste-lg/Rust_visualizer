@@ -42,7 +42,6 @@ pub struct VisualsConfig {
     pub disc_center_radius_factor: f32,
 
     // --- Ico Visualizer Settings ---
-    // Ajouté pour contrôler le nouveau shader
     pub ico_speed: f32,
     pub ico_color: Color,
 }
@@ -51,7 +50,8 @@ impl Default for VisualsConfig {
     fn default() -> Self {
         Self {
             // --- General ---
-            bass_sensitivity: 4.0,
+            // MODIFICATION ICI : Valeur par défaut passée de 4.0 à 1.0
+            bass_sensitivity: 1.0,
             num_bands: 16,
             details_panel_enabled: false,
 
@@ -86,8 +86,8 @@ impl Default for VisualsConfig {
             disc_center_radius_factor: 1.0,
 
             // --- Ico Visualizer Defaults ---
-            ico_speed: 0.5,                       // Une vitesse modérée par défaut
-            ico_color: Color::rgb(0.5, 0.8, 0.9), // Un bleu métallique sympa
+            ico_speed: 0.5,
+            ico_color: Color::rgb(0.5, 0.8, 0.9),
         }
     }
 }
