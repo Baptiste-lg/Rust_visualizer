@@ -7,7 +7,7 @@ use bevy::{
     prelude::*,
     window::PrimaryWindow,
 };
-use bevy_egui::EguiContexts;
+use bevy_egui::{EguiContexts, EguiSet};
 
 pub struct CameraPlugin;
 
@@ -44,10 +44,12 @@ impl Plugin for CameraPlugin {
             .add_systems(OnExit(AppState::VisualizationOrb), despawn_3d_camera)
             .add_systems(
                 Update,
-                (pan_orbit_camera, update_bloom_settings).run_if(
-                    in_state(AppState::Visualization3D)
-                        .or_else(in_state(AppState::VisualizationOrb)),
-                ),
+                (pan_orbit_camera, update_bloom_settings)
+                    .run_if(
+                        in_state(AppState::Visualization3D)
+                            .or_else(in_state(AppState::VisualizationOrb)),
+                    )
+                    .after(EguiSet::InitContexts),
             )
             // Systems for the 2D camera
             .add_systems(OnEnter(AppState::Visualization2D), setup_2d_camera)
@@ -58,11 +60,13 @@ impl Plugin for CameraPlugin {
             .add_systems(OnExit(AppState::VisualizationIco), despawn_2d_camera)
             .add_systems(
                 Update,
-                control_2d_camera.run_if(
-                    in_state(AppState::Visualization2D)
-                        .or_else(in_state(AppState::VisualizationDisc))
-                        .or_else(in_state(AppState::VisualizationIco)),
-                ),
+                control_2d_camera
+                    .run_if(
+                        in_state(AppState::Visualization2D)
+                            .or_else(in_state(AppState::VisualizationDisc))
+                            .or_else(in_state(AppState::VisualizationIco)),
+                    )
+                    .after(EguiSet::InitContexts),
             );
     }
 }
@@ -152,9 +156,11 @@ fn control_2d_camera(
     mut camera_query: Query<&mut OrthographicProjection, With<MainCamera2D>>,
     mut contexts: EguiContexts,
 ) {
-    if contexts.ctx_mut().is_pointer_over_area() || contexts.ctx_mut().wants_pointer_input() {
-        ev_scroll.clear();
-        return;
+    if let Some(ctx) = contexts.try_ctx_mut() {
+        if ctx.is_pointer_over_area() || ctx.wants_pointer_input() {
+            ev_scroll.clear();
+            return;
+        }
     }
 
     if let Ok(mut projection) = camera_query.get_single_mut() {
@@ -174,11 +180,12 @@ fn pan_orbit_camera(
     mut query: Query<(&mut PanOrbitController, &mut Transform), With<MainCamera3D>>,
     mut contexts: EguiContexts,
 ) {
-    let ctx = contexts.ctx_mut();
-    if ctx.is_pointer_over_area() || ctx.wants_pointer_input() {
-        ev_motion.clear();
-        ev_scroll.clear();
-        return;
+    if let Some(ctx) = contexts.try_ctx_mut() {
+        if ctx.is_pointer_over_area() || ctx.wants_pointer_input() {
+            ev_motion.clear();
+            ev_scroll.clear();
+            return;
+        }
     }
 
     let Ok(window) = primary_window.get_single() else {

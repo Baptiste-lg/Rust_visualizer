@@ -16,14 +16,18 @@ use std::time::Duration;
 #[derive(Resource)]
 pub struct UiVisibility {
     pub visible: bool,
+    pub hint_timer: Timer, // <--- AJOUT
 }
 
 impl Default for UiVisibility {
     fn default() -> Self {
-        Self { visible: true }
+        Self {
+            visible: true,
+            // Le timer est configuré pour 10 secondes, mode "Once" (pas de boucle)
+            hint_timer: Timer::from_seconds(10.0, TimerMode::Once),
+        }
     }
 }
-
 pub struct UiPlugin;
 
 impl Plugin for UiPlugin {
@@ -74,6 +78,11 @@ struct MicDeviceButton(String);
 fn toggle_ui_visibility(keyboard: Res<ButtonInput<KeyCode>>, mut ui_viz: ResMut<UiVisibility>) {
     if keyboard.just_pressed(KeyCode::KeyH) {
         ui_viz.visible = !ui_viz.visible;
+
+        // Si on vient de cacher l'UI, on relance le timer du message
+        if !ui_viz.visible {
+            ui_viz.hint_timer.reset();
+        }
     }
 }
 
@@ -85,7 +94,8 @@ fn main_ui_layout(
     mut selected_source: ResMut<SelectedAudioSource>,
     mut viz_enabled: ResMut<VisualizationEnabled>,
     mut playback_info: ResMut<PlaybackInfo>,
-    ui_visibility: Res<UiVisibility>,
+    mut ui_visibility: ResMut<UiVisibility>,
+    time: Res<Time>,
     audio_analysis: Res<AudioAnalysis>,
     app_state: Res<State<AppState>>,
     mut next_app_state: ResMut<NextState<AppState>>,
@@ -95,6 +105,10 @@ fn main_ui_layout(
     if q_windows.get_single().is_err() {
         return;
     }
+    if !ui_visibility.visible {
+        ui_visibility.hint_timer.tick(time.delta());
+    }
+
     let ctx = contexts.ctx_mut();
 
     egui::Area::new("ui_toggle_hint".into())
@@ -106,7 +120,7 @@ fn main_ui_layout(
             egui::Frame::default().inner_margin(5.0).show(ui, |ui| {
                 if ui_visibility.visible {
                     ui.label("Press 'H' to Hide UI");
-                } else {
+                } else if !ui_visibility.hint_timer.finished() {
                     ui.label("Press 'H' to Show UI");
                 }
             });
