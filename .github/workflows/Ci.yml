@@ -20,10 +20,11 @@ jobs:
       - name: Check Formatting
         run: cargo fmt -- --check
 
-  # Job 2: Run linter (Clippy) to catch common mistakes
+  # Job 2: Run linter (Clippy)
   linting:
     name: Run Clippy
     runs-on: self-hosted
+    needs: formatting
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -34,6 +35,7 @@ jobs:
   testing:
     name: Run Tests
     runs-on: self-hosted
+    needs: linting
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -41,11 +43,10 @@ jobs:
         run: cargo test --verbose
 
   # Job 4: Build Release & Upload Artifact
-  # This job only runs if formatting, linting, and testing are successful
   build:
     name: Build Release
     runs-on: self-hosted
-    needs: [formatting, linting, testing]
+    needs: testing
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
