@@ -156,6 +156,7 @@ fn control_2d_camera(
     mut camera_query: Query<&mut OrthographicProjection, With<MainCamera2D>>,
     mut contexts: EguiContexts,
 ) {
+    #[allow(clippy::collapsible_if)]
     if let Some(ctx) = contexts.try_ctx_mut() {
         if ctx.is_pointer_over_area() || ctx.wants_pointer_input() {
             ev_scroll.clear();
@@ -180,6 +181,7 @@ fn pan_orbit_camera(
     mut query: Query<(&mut PanOrbitController, &mut Transform), With<MainCamera3D>>,
     mut contexts: EguiContexts,
 ) {
+    #[allow(clippy::collapsible_if)]
     if let Some(ctx) = contexts.try_ctx_mut() {
         if ctx.is_pointer_over_area() || ctx.wants_pointer_input() {
             ev_motion.clear();
