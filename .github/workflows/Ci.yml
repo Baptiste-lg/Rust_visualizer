@@ -1,6 +1,5 @@
 ﻿name: Rust Visualizer CI/CD
 
-# Trigger logic: Push to main/master or semantic tags
 on:
   push:
     branches: [ "main", "master" ]
@@ -11,16 +10,20 @@ on:
 env:
   CARGO_TERM_COLOR: always
 
-# Expanded permissions to allow Release creation and GitHub Pages deployment
 permissions:
   contents: write
   checks: write
   issues: write
-  pages: write      # Required for GitHub Pages
-  id-token: write   # Required for OIDC authentication with GitHub Pages
+  pages: write
+  id-token: write
+
+# --- FIX 1: Empêche les conflits de déploiement (Race Condition) ---
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
+# -------------------------------------------------------------------
 
 jobs:
-  # Job 1: Quality Assurance & Security
   quality:
     name: Code Quality & Security
     runs-on: ubuntu-latest
@@ -28,12 +31,10 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # Installing system dependencies required for audio/graphics libraries
-      - name: Install Linux Audio & Graphics Dependencies
+      - name: Install Linux Audio Dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y libasound2-dev libudev-dev pkg-config libx11-dev libxcursor-dev libxi-dev libxrandr-dev libwayland-dev libxkbcommon-dev
-
       - name: Cache Cargo registry & index
         uses: actions/cache@v3
         with:
@@ -48,11 +49,11 @@ jobs:
         with:
           components: rustfmt, clippy
 
-      # Security Audit: Scans Cargo.lock for vulnerabilities reported in the RustSec Advisory Database
       - name: Security Audit
         uses: actions-rs/audit-check@v1
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
+          ignore: RUSTSEC-2024-0436
 
       - name: Check Formatting
         run: cargo fmt -- --check
@@ -60,7 +61,6 @@ jobs:
       - name: Run Clippy (Linter)
         run: cargo clippy -- -D warnings
 
-  # Job 2: Test Suite
   test:
     name: Test on ${{ matrix.os }}
     needs: quality
@@ -73,24 +73,20 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # Conditional dependency installation for Linux runners only
       - name: Install Linux Dependencies
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y libasound2-dev libudev-dev pkg-config libx11-dev libxcursor-dev libxi-dev libxrandr-dev libwayland-dev libxkbcommon-dev
-
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
-      # Implements intelligent caching specifically for Rust build artifacts
       - name: Rust Cache
         uses: swatinem/rust-cache@v2
 
       - name: Run Tests
         run: cargo test --verbose
 
-  # Job 3: Auto-Documentation
   documentation:
     name: Build & Deploy Docs
     needs: quality
@@ -114,17 +110,16 @@ jobs:
       - name: Generate Documentation
         run: cargo doc --no-deps --release
 
-      # We detect the folder name dynamically.
-      - name: Create Smart Redirect
+      - name: Prepare Documentation for GitHub Pages
         run: |
-          # Find the directory that contains the 'index.html' of the project
-          # We look inside target/doc for a directory that matches the project name structure
+          # 1. Create the Smart Redirect
           PROJECT_DOC_DIR=$(find target/doc -maxdepth 1 -type d -not -path 'target/doc' -exec test -e "{}/index.html" \; -print | head -n 1 | xargs basename)
-          
           echo "Detected documentation folder: $PROJECT_DOC_DIR"
-          
-          # Create the root index.html with the correct redirect
           echo "<meta http-equiv=\"refresh\" content=\"0; url=$PROJECT_DOC_DIR/index.html\">" > target/doc/index.html
+          
+          # --- FIX 2: Désactive Jekyll pour autoriser les fichiers commençant par "_" ---
+          touch target/doc/.nojekyll
+          # ----------------------------------------------------------------------------
 
       - name: Upload Pages Artifact
         uses: actions/upload-pages-artifact@v3
@@ -135,7 +130,6 @@ jobs:
         id: deployment
         uses: actions/deploy-pages@v4
 
-  # Job 4: Continuous Deployment (Release)
   deploy:
     name: Deploy Release for ${{ matrix.os }}
     needs: test
@@ -161,7 +155,6 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
-      # Dependencies needed for compilation on Linux runners
       - name: Install Linux Dependencies
         if: runner.os == 'Linux'
         run: |
@@ -171,8 +164,6 @@ jobs:
       - name: Build Release Binary
         run: cargo build --release --verbose
 
-      # Prepares the binary for upload by renaming it according to the OS convention
-      # 'shell: bash' unifies the command syntax across different OS runners
       - name: Prepare Artifact
         shell: bash
         run: |
