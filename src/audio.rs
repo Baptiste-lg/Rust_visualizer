@@ -123,7 +123,6 @@ impl Plugin for AudioPlugin {
                         .or_else(in_state(AppState::Visualization3D))
                         .or_else(in_state(AppState::VisualizationOrb))
                         .or_else(in_state(AppState::VisualizationDisc))
-                        // AJOUT : On active l'audio aussi pour l'Ico
                         .or_else(in_state(AppState::VisualizationIco)),
                 ),
         );
@@ -389,7 +388,6 @@ fn apply_playback_changes(
 }
 
 fn update_playback_position(mut playback_info: ResMut<PlaybackInfo>, sink: NonSend<Sink>) {
-    // FIX: Fusion des deux 'if' pour satisfaire clippy::collapsible_if
     if playback_info.status == PlaybackStatus::Playing
         && let Some(last_update) = playback_info.last_update
     {

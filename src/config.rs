@@ -50,7 +50,6 @@ impl Default for VisualsConfig {
     fn default() -> Self {
         Self {
             // --- General ---
-            // MODIFICATION ICI : Valeur par défaut passée de 4.0 à 1.0
             bass_sensitivity: 1.0,
             num_bands: 16,
             details_panel_enabled: false,
