@@ -2,6 +2,8 @@
 # On utilise l'image officielle Rust pour compiler
 FROM rust:1.83 as builder
 
+RUN apt-get update && apt-get install -y libasound2-dev libudev-dev
+
 WORKDIR /usr/src/app
 COPY . .
 
