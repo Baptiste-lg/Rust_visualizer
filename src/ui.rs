@@ -98,7 +98,6 @@ fn main_ui_layout(
     }
     let ctx = contexts.ctx_mut();
 
-    // CORRECTION 2: .into() requis pour convertir le string en Id Egui
     egui::Area::new("ui_toggle_hint".into())
         .anchor(egui::Align2::CENTER_TOP, egui::vec2(0.0, 10.0))
         .show(ctx, |ui| {
@@ -288,13 +287,14 @@ fn main_ui_layout(
             if ui.button("🎤 Microphone").clicked() {
                 selected_source.0 = AudioSource::Microphone;
             }
-            if ui.button("📂 Load File").clicked() {
-                if let Some(path) = rfd::FileDialog::new()
+
+            // FIX: Fusion des if imbriqués pour satisfaire clippy::collapsible_if
+            if ui.button("📂 Load File").clicked()
+                && let Some(path) = rfd::FileDialog::new()
                     .add_filter("audio", &["mp3", "wav"])
                     .pick_file()
-                {
-                    selected_source.0 = AudioSource::File(path);
-                }
+            {
+                selected_source.0 = AudioSource::File(path);
             }
 
             // Playback Controls (Si fichier)
@@ -340,7 +340,7 @@ fn main_ui_layout(
             ui.separator();
             ui.checkbox(&mut config.details_panel_enabled, "Show Analysis Data");
 
-            // Panneau de détails intégré
+            // Panneau de détails intégré (au lieu d'une fenêtre flottante)
             if config.details_panel_enabled {
                 ui.separator();
                 ui.label(egui::RichText::new("Analysis Data").strong());
@@ -423,6 +423,7 @@ fn setup_main_menu(mut commands: Commands) {
         });
 }
 
+#[allow(clippy::type_complexity)]
 fn menu_button_interaction(
     mut button_query: Query<
         (&Interaction, &MenuButtonAction),
@@ -435,6 +436,7 @@ fn menu_button_interaction(
         if *interaction == Interaction::Pressed {
             match action {
                 MenuButtonAction::Start => {
+                    // Transition to the last active visualization.
                     next_app_state.set(active_viz.0.clone());
                 }
                 MenuButtonAction::ToMicSelection => {

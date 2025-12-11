@@ -389,19 +389,22 @@ fn apply_playback_changes(
 }
 
 fn update_playback_position(mut playback_info: ResMut<PlaybackInfo>, sink: NonSend<Sink>) {
-    if playback_info.status == PlaybackStatus::Playing {
-        if let Some(last_update) = playback_info.last_update {
-            let elapsed_since_update = last_update.elapsed().as_secs_f32() * sink.speed();
-            let new_pos = playback_info.position_at_last_update
-                + Duration::from_secs_f32(elapsed_since_update);
+    // FIX: Fusion des deux 'if' pour satisfaire clippy::collapsible_if
+    if playback_info.status == PlaybackStatus::Playing
+        && let Some(last_update) = playback_info.last_update
+    {
+        let elapsed_since_update = last_update.elapsed().as_secs_f32() * sink.speed();
+        let new_pos =
+            playback_info.position_at_last_update + Duration::from_secs_f32(elapsed_since_update);
 
-            if new_pos >= playback_info.duration && playback_info.duration != Duration::ZERO {
-                playback_info.position = playback_info.duration;
-                playback_info.status = PlaybackStatus::Paused;
-                playback_info.last_update = None;
-            } else {
-                playback_info.position = new_pos;
-            }
+        if new_pos >= playback_info.duration && playback_info.duration != Duration::ZERO {
+            // Playback has finished.
+            playback_info.position = playback_info.duration;
+            playback_info.status = PlaybackStatus::Paused;
+            playback_info.last_update = None;
+        } else {
+            // Update the position for display purposes.
+            playback_info.position = new_pos;
         }
     }
 }
