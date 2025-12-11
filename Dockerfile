@@ -2,7 +2,16 @@
 # On utilise l'image officielle Rust pour compiler
 FROM rust:1.83 as builder
 
-RUN apt-get update && apt-get install -y libasound2-dev libudev-dev
+RUN apt-get update && apt-get install -y \
+    libasound2-dev \
+    libudev-dev \
+    pkg-config \
+    libx11-dev \
+    libxcursor-dev \
+    libxi-dev \
+    libxrandr-dev \
+    libwayland-dev \
+    libxkbcommon-dev \
 
 WORKDIR /usr/src/app
 COPY . .
