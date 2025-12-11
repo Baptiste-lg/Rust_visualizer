@@ -1,6 +1,6 @@
 // src/viz_orb.rs
 
-use crate::{AppState, VisualizationEnabled, audio::AudioAnalysis, config::VisualsConfig};
+use crate::{audio::AudioAnalysis, config::VisualsConfig, AppState, VisualizationEnabled};
 use bevy::{
     prelude::*,
     render::mesh::{Mesh, VertexAttributeValues},

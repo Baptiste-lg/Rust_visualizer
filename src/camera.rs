@@ -1,6 +1,6 @@
 // src/camera.rs
 
-use crate::{AppState, config::VisualsConfig};
+use crate::{config::VisualsConfig, AppState};
 use bevy::{
     core_pipeline::bloom::BloomSettings,
     input::mouse::{MouseMotion, MouseWheel},

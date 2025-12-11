@@ -1,4 +1,4 @@
-use crate::{AppState, audio::AudioAnalysis, camera::MainCamera2D, config::VisualsConfig};
+use crate::{audio::AudioAnalysis, camera::MainCamera2D, config::VisualsConfig, AppState};
 use bevy::{
     prelude::*,
     reflect::TypePath,

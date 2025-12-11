@@ -1,6 +1,6 @@
 // src/viz_2d.rs
 
-use crate::{AppState, VisualizationEnabled, audio::AudioAnalysis, config::VisualsConfig};
+use crate::{audio::AudioAnalysis, config::VisualsConfig, AppState, VisualizationEnabled};
 use bevy::prelude::*;
 
 pub struct Viz2DPlugin;

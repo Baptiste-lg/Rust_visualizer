@@ -1,11 +1,11 @@
 // src/audio.rs
 
-use crate::{AppState, VisualizationEnabled, config::VisualsConfig};
+use crate::{config::VisualsConfig, AppState, VisualizationEnabled};
 use bevy::prelude::*;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use rodio::{Decoder, Sink, source::Source};
+use rodio::{source::Source, Decoder, Sink};
 use spectrum_analyzer::{
-    FrequencyLimit, samples_fft_to_spectrum, scaling::divide_by_N_sqrt, windows::hann_window,
+    samples_fft_to_spectrum, scaling::divide_by_N_sqrt, windows::hann_window, FrequencyLimit,
 };
 use std::collections::VecDeque;
 use std::io::Cursor;
@@ -391,7 +391,8 @@ fn update_playback_position(mut playback_info: ResMut<PlaybackInfo>, sink: NonSe
     if playback_info.status == PlaybackStatus::Playing {
         if let Some(last_update) = playback_info.last_update {
             let elapsed_since_update = last_update.elapsed().as_secs_f32() * sink.speed();
-            let new_pos = playback_info.position_at_last_update + Duration::from_secs_f32(elapsed_since_update);
+            let new_pos = playback_info.position_at_last_update
+                + Duration::from_secs_f32(elapsed_since_update);
 
             if new_pos >= playback_info.duration && playback_info.duration != Duration::ZERO {
                 // Playback has finished.

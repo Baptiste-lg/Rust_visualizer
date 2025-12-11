@@ -8,7 +8,7 @@ use crate::{ActiveVisualization, AppState, VisualizationEnabled};
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 use bevy_egui::egui::color_picker;
-use bevy_egui::{EguiContexts, EguiSet, egui};
+use bevy_egui::{egui, EguiContexts, EguiSet};
 use cpal::traits::{DeviceTrait, HostTrait};
 use std::time::Duration;
 
