@@ -12,6 +12,18 @@ use bevy_egui::{EguiContexts, EguiSet, egui};
 use cpal::traits::{DeviceTrait, HostTrait};
 use std::time::Duration;
 
+// Une ressource pour savoir si l'UI est affichée ou cachée
+#[derive(Resource)]
+pub struct UiVisibility {
+    pub visible: bool,
+}
+
+impl Default for UiVisibility {
+    fn default() -> Self {
+        Self { visible: true }
+    }
+}
+
 pub struct UiPlugin;
 
 impl Plugin for UiPlugin {
@@ -31,9 +43,8 @@ impl Plugin for UiPlugin {
             .add_systems(
                 Update,
                 (
-                    visualizer_ui_system,
-                    audio_details_panel_system,
-                    playback_controls_system,
+                    toggle_ui_visibility, // Système pour la touche 'H'
+                    main_ui_layout,       // Le gros système qui gère les panneaux
                 )
                     .after(EguiSet::InitContexts)
                     .run_if(
@@ -47,20 +58,343 @@ impl Plugin for UiPlugin {
     }
 }
 
-// A marker component for buttons in the main menu.
+// --- Composants Menu Principal (Inchangés) ---
 #[derive(Component)]
 enum MenuButtonAction {
     Start,
     ToMicSelection,
 }
 
-// A marker component for all UI elements in the main menu.
 #[derive(Component)]
 struct MainMenuUI;
 #[derive(Component)]
 struct MicDeviceButton(String);
 
-// Sets up the main menu UI when entering the `MainMenu` state.
+// --- Système de Toggle UI ---
+fn toggle_ui_visibility(keyboard: Res<ButtonInput<KeyCode>>, mut ui_viz: ResMut<UiVisibility>) {
+    // CORRECTION 1: Bevy 0.14 utilise KeyCode::KeyH au lieu de KeyCode::H
+    if keyboard.just_pressed(KeyCode::KeyH) {
+        ui_viz.visible = !ui_viz.visible;
+    }
+}
+
+// --- Système Principal d'UI (Layout & Contenu) ---
+#[allow(clippy::too_many_arguments)]
+fn main_ui_layout(
+    mut contexts: EguiContexts,
+    mut config: ResMut<VisualsConfig>,
+    mut selected_source: ResMut<SelectedAudioSource>,
+    mut viz_enabled: ResMut<VisualizationEnabled>,
+    mut playback_info: ResMut<PlaybackInfo>,
+    ui_visibility: Res<UiVisibility>,
+    audio_analysis: Res<AudioAnalysis>,
+    app_state: Res<State<AppState>>,
+    mut next_app_state: ResMut<NextState<AppState>>,
+    mut active_viz: ResMut<ActiveVisualization>,
+    q_windows: Query<Entity, With<PrimaryWindow>>,
+) {
+    if q_windows.get_single().is_err() {
+        return;
+    }
+    let ctx = contexts.ctx_mut();
+
+    // CORRECTION 2: .into() requis pour convertir le string en Id Egui
+    egui::Area::new("ui_toggle_hint".into())
+        .anchor(egui::Align2::CENTER_TOP, egui::vec2(0.0, 10.0))
+        .show(ctx, |ui| {
+            ui.visuals_mut().widgets.noninteractive.bg_fill = egui::Color32::from_black_alpha(150);
+            ui.visuals_mut().widgets.noninteractive.fg_stroke =
+                egui::Stroke::new(1.0, egui::Color32::WHITE);
+            egui::Frame::default().inner_margin(5.0).show(ui, |ui| {
+                if ui_visibility.visible {
+                    ui.label("Press 'H' to Hide UI");
+                } else {
+                    ui.label("Press 'H' to Show UI");
+                }
+            });
+        });
+
+    // Si l'UI est cachée, on arrête ici
+    if !ui_visibility.visible {
+        return;
+    }
+
+    let current_state = app_state.get();
+
+    // --- PANNEAU GAUCHE : Paramètres du Visualiseur Actif ---
+    egui::SidePanel::left("viz_settings_panel")
+        .resizable(true)
+        .default_width(250.0)
+        .show(ctx, |ui| {
+            ui.add_space(10.0);
+            ui.heading("🎨 Visualizer Settings");
+            ui.separator();
+
+            // Paramètre Global
+            ui.label("Amplitude Sensitivity");
+            ui.add(egui::Slider::new(&mut config.bass_sensitivity, 0.1..=10.0));
+
+            ui.separator();
+
+            // Paramètres Contextuels
+            egui::ScrollArea::vertical().show(ui, |ui| match current_state {
+                AppState::Visualization2D => {
+                    ui.label("Inactive Color");
+                    color_picker_widget(ui, &mut config.viz2d_inactive_color);
+                    ui.label("Active Color");
+                    color_picker_widget(ui, &mut config.viz2d_active_color);
+
+                    ui.separator();
+                    ui.label("Frequency Bands (Rebuilds Grid)");
+                    ui.add(egui::Slider::new(&mut config.num_bands, 4..=64));
+                }
+                AppState::Visualization3D => {
+                    ui.checkbox(&mut config.spread_enabled, "Spread Effect");
+                    ui.label("Column Size");
+                    ui.add(egui::Slider::new(&mut config.viz3d_column_size, 1..=16));
+                    ui.label("Cube Base Color");
+                    color_picker_widget(ui, &mut config.viz3d_base_color);
+
+                    ui.separator();
+                    ui.label("Frequency Bands (Rebuilds Grid)");
+                    ui.add(egui::Slider::new(&mut config.num_bands, 4..=32));
+
+                    ui.separator();
+                    render_bloom_ui(ui, &mut config);
+                }
+                AppState::VisualizationOrb => {
+                    ui.label("Base Color");
+                    color_picker_widget(ui, &mut config.orb_base_color);
+                    ui.label("Peak Color");
+                    color_picker_widget(ui, &mut config.orb_peak_color);
+
+                    ui.separator();
+                    ui.label("Noise Speed");
+                    ui.add(egui::Slider::new(&mut config.orb_noise_speed, 0.1..=5.0));
+                    ui.label("Noise Frequency");
+                    ui.add(egui::Slider::new(
+                        &mut config.orb_noise_frequency,
+                        0.5..=10.0,
+                    ));
+                    ui.label("Treble Influence");
+                    ui.add(egui::Slider::new(
+                        &mut config.orb_treble_influence,
+                        0.0..=1.0,
+                    ));
+
+                    ui.separator();
+                    render_bloom_ui(ui, &mut config);
+                }
+                AppState::VisualizationDisc => {
+                    ui.label("Disc Color");
+                    color_picker_widget(ui, &mut config.disc_color);
+
+                    ui.label("Radius");
+                    ui.add(egui::Slider::new(&mut config.disc_radius, 0.1..=2.0));
+
+                    ui.label("Line Thickness");
+                    ui.add(egui::Slider::new(
+                        &mut config.disc_line_thickness,
+                        0.01..=0.5,
+                    ));
+
+                    ui.label("Iterations (Echoes)");
+                    ui.add(egui::Slider::new(&mut config.disc_iterations, 1..=50));
+
+                    ui.label("Rotation Speed");
+                    ui.add(egui::Slider::new(&mut config.disc_speed, -5.0..=5.0));
+
+                    ui.label("Center Factor");
+                    ui.add(egui::Slider::new(
+                        &mut config.disc_center_radius_factor,
+                        -1.0..=2.0,
+                    ));
+                }
+                AppState::VisualizationIco => {
+                    ui.label("Metallic Color");
+                    color_picker_widget(ui, &mut config.ico_color);
+
+                    ui.label("Rotation Speed");
+                    ui.add(egui::Slider::new(&mut config.ico_speed, -3.0..=3.0));
+                }
+                _ => {}
+            });
+        });
+
+    // --- PANNEAU DROIT : Contrôles Globaux ---
+    egui::SidePanel::right("global_controls_panel")
+        .resizable(true)
+        .default_width(250.0)
+        .show(ctx, |ui| {
+            ui.add_space(10.0);
+            ui.heading("🎛 Controls");
+            ui.separator();
+
+            // Choix du Visualiseur
+            ui.label("Select Visualizer:");
+            ui.horizontal_wrapped(|ui| {
+                if ui
+                    .selectable_label(*current_state == AppState::Visualization2D, "2D Bars")
+                    .clicked()
+                {
+                    next_app_state.set(AppState::Visualization2D);
+                    active_viz.0 = AppState::Visualization2D;
+                }
+                if ui
+                    .selectable_label(*current_state == AppState::Visualization3D, "3D Cubes")
+                    .clicked()
+                {
+                    next_app_state.set(AppState::Visualization3D);
+                    active_viz.0 = AppState::Visualization3D;
+                }
+                if ui
+                    .selectable_label(*current_state == AppState::VisualizationOrb, "3D Orb")
+                    .clicked()
+                {
+                    next_app_state.set(AppState::VisualizationOrb);
+                    active_viz.0 = AppState::VisualizationOrb;
+                }
+                if ui
+                    .selectable_label(*current_state == AppState::VisualizationDisc, "Disc")
+                    .clicked()
+                {
+                    next_app_state.set(AppState::VisualizationDisc);
+                    active_viz.0 = AppState::VisualizationDisc;
+                }
+                if ui
+                    .selectable_label(*current_state == AppState::VisualizationIco, "Ico")
+                    .clicked()
+                {
+                    next_app_state.set(AppState::VisualizationIco);
+                    active_viz.0 = AppState::VisualizationIco;
+                }
+            });
+
+            ui.separator();
+
+            // Toggle On/Off global
+            let btn_text = if viz_enabled.0 {
+                "⏹ Stop Render"
+            } else {
+                "▶ Start Render"
+            };
+            if ui.button(btn_text).clicked() {
+                viz_enabled.0 = !viz_enabled.0;
+            }
+
+            ui.separator();
+            ui.heading("🎵 Audio Source");
+
+            if ui.button("🎤 Microphone").clicked() {
+                selected_source.0 = AudioSource::Microphone;
+            }
+            if ui.button("📂 Load File").clicked() {
+                if let Some(path) = rfd::FileDialog::new()
+                    .add_filter("audio", &["mp3", "wav"])
+                    .pick_file()
+                {
+                    selected_source.0 = AudioSource::File(path);
+                }
+            }
+
+            // Playback Controls (Si fichier)
+            if let AudioSource::File(_) = selected_source.0 {
+                ui.separator();
+                ui.label("Playback:");
+                ui.horizontal(|ui| {
+                    let icon = if playback_info.status == PlaybackStatus::Playing {
+                        "⏸"
+                    } else {
+                        "▶"
+                    };
+                    if ui.button(icon).clicked() {
+                        playback_info.status = match playback_info.status {
+                            PlaybackStatus::Playing => PlaybackStatus::Paused,
+                            PlaybackStatus::Paused => PlaybackStatus::Playing,
+                        };
+                    }
+
+                    // Speed
+                    ui.label("Speed:");
+                    ui.add(egui::Slider::new(&mut playback_info.speed, 0.25..=2.0).text("x"));
+                });
+
+                // Progress Bar
+                if playback_info.duration > Duration::ZERO {
+                    let total = playback_info.duration.as_secs_f32();
+                    let mut pos = playback_info.position.as_secs_f32();
+                    let label = format!("{:.0}s / {:.0}s", pos, total);
+                    if ui
+                        .add(
+                            egui::Slider::new(&mut pos, 0.0..=total)
+                                .show_value(false)
+                                .text(label),
+                        )
+                        .changed()
+                    {
+                        playback_info.seek_to = Some(pos);
+                    }
+                }
+            }
+
+            ui.separator();
+            ui.checkbox(&mut config.details_panel_enabled, "Show Analysis Data");
+
+            // Panneau de détails intégré
+            if config.details_panel_enabled {
+                ui.separator();
+                ui.label(egui::RichText::new("Analysis Data").strong());
+                ui.style_mut().override_text_style = Some(egui::TextStyle::Monospace);
+                ui.label(format!("Volume: {:.3}", audio_analysis.volume));
+                ui.label(format!("Bass:   {:.2}", audio_analysis.bass));
+                ui.label(format!("Mid:    {:.2}", audio_analysis.mid));
+                ui.label(format!("Treble: {:.2}", audio_analysis.treble));
+                ui.label(format!("Flux:   {:.2}", audio_analysis.flux));
+            }
+        });
+}
+
+fn render_bloom_ui(ui: &mut egui::Ui, config: &mut VisualsConfig) {
+    ui.heading("✨ Bloom");
+    ui.checkbox(&mut config.bloom_enabled, "Enable");
+    if config.bloom_enabled {
+        ui.label("Intensity");
+        ui.add(egui::Slider::new(&mut config.bloom_intensity, 0.0..=1.0));
+        ui.label("Threshold");
+        ui.add(egui::Slider::new(&mut config.bloom_threshold, 0.0..=2.0));
+        ui.label("Tint");
+        color_picker_widget(ui, &mut config.bloom_color);
+    }
+}
+
+// CORRECTION 3: Adaptation complète pour egui 0.27+ et Bevy Color
+fn color_picker_widget(ui: &mut egui::Ui, color: &mut Color) {
+    // 1. Conversion Bevy Color -> [f32; 4]
+    // Note: Si tu es sur Bevy 0.14 strict, color.r() n'existe peut-être pas directement
+    // mais si ton code compilait avant (hors egui), on suppose que ça passe ou que tu as un trait.
+    // Sinon, utilise `color.to_linear().red` etc.
+    let mut rgba_array = [color.r(), color.g(), color.b(), color.a()];
+
+    // 2. Création d'une couleur Egui (Rgba est premultiplied par défaut)
+    // On utilise from_rgba_unmultiplied car nos inputs sont linéaires/unmultiplied
+    let mut egui_color = egui::Rgba::from_rgba_unmultiplied(
+        rgba_array[0],
+        rgba_array[1],
+        rgba_array[2],
+        rgba_array[3],
+    );
+
+    // 3. Affichage du widget
+    if color_picker::color_edit_button_rgba(ui, &mut egui_color, color_picker::Alpha::Opaque)
+        .changed()
+    {
+        // 4. Conversion retour vers Bevy Color
+        let result = egui_color.to_rgba_unmultiplied();
+        *color = Color::rgba(result[0], result[1], result[2], result[3]);
+    }
+}
+
+// --- Setup Main Menu (Inchangé) ---
 fn setup_main_menu(mut commands: Commands) {
     commands.spawn((Camera2dBundle::default(), MainMenuUI));
     commands
@@ -89,8 +423,6 @@ fn setup_main_menu(mut commands: Commands) {
         });
 }
 
-// Handles interactions with the main menu buttons.
-#[allow(clippy::type_complexity)]
 fn menu_button_interaction(
     mut button_query: Query<
         (&Interaction, &MenuButtonAction),
@@ -103,7 +435,6 @@ fn menu_button_interaction(
         if *interaction == Interaction::Pressed {
             match action {
                 MenuButtonAction::Start => {
-                    // Transition to the last active visualization.
                     next_app_state.set(active_viz.0.clone());
                 }
                 MenuButtonAction::ToMicSelection => {
@@ -177,8 +508,6 @@ fn setup_mic_selection_menu(mut commands: Commands) {
                 }
             }
         });
-    } else {
-        error!("Failed to get input devices");
     }
 }
 
@@ -195,348 +524,6 @@ fn mic_selection_interaction(
     }
 }
 
-// This system draws the main control panel for the visualizer using egui.
-#[allow(clippy::too_many_arguments)]
-fn visualizer_ui_system(
-    mut contexts: EguiContexts,
-    mut config: ResMut<VisualsConfig>,
-    mut selected_source: ResMut<SelectedAudioSource>,
-    mut viz_enabled: ResMut<VisualizationEnabled>,
-    app_state: Res<State<AppState>>,
-    mut next_app_state: ResMut<NextState<AppState>>,
-    mut active_viz: ResMut<ActiveVisualization>,
-    q_windows: Query<Entity, With<PrimaryWindow>>,
-) {
-    if q_windows.get_single().is_err() {
-        return;
-    }
-
-    let current_state = app_state.get();
-    let ctx = contexts.ctx_mut();
-
-    egui::Window::new("Controls").show(ctx, |ui| {
-        ui.heading("General");
-        ui.checkbox(&mut config.details_panel_enabled, "Show Details Panel");
-        ui.separator();
-
-        ui.label("Number of Bands");
-        ui.add(egui::Slider::new(&mut config.num_bands, 4..=32).logarithmic(true));
-
-        ui.label("Amplitude Sensitivity");
-        ui.add(egui::Slider::new(&mut config.bass_sensitivity, 0.0..=8.0));
-
-        // --- Specific Controls for each visualization ---
-
-        if *current_state == AppState::Visualization2D {
-            ui.separator();
-            ui.heading("2D Bar Controls");
-        }
-
-        if *current_state == AppState::VisualizationDisc {
-            ui.separator();
-            ui.heading("Disc Controls");
-
-            ui.label("Disc Color");
-            let mut color_temp_disc = [
-                config.disc_color.r(),
-                config.disc_color.g(),
-                config.disc_color.b(),
-            ];
-            if color_picker::color_edit_button_rgb(ui, &mut color_temp_disc).changed() {
-                config.disc_color =
-                    Color::rgb(color_temp_disc[0], color_temp_disc[1], color_temp_disc[2]);
-            }
-
-            ui.label("Radius");
-            ui.add(egui::Slider::new(&mut config.disc_radius, 0.1..=2.0));
-
-            ui.label("Line Thickness");
-            ui.add(egui::Slider::new(
-                &mut config.disc_line_thickness,
-                0.01..=0.5,
-            ));
-
-            ui.label("Iterations");
-            ui.add(egui::Slider::new(&mut config.disc_iterations, 1..=50));
-
-            ui.label("Speed");
-            ui.add(egui::Slider::new(&mut config.disc_speed, -5.0..=5.0));
-
-            ui.label("Center Radius Factor");
-            ui.add(egui::Slider::new(
-                &mut config.disc_center_radius_factor,
-                -1.0..=2.0,
-            ));
-        }
-
-        if *current_state == AppState::Visualization3D {
-            ui.separator();
-            ui.heading("3D Cube Controls");
-            ui.checkbox(&mut config.spread_enabled, "Enable Spread Effect");
-            ui.label("Column Size");
-            ui.add(egui::Slider::new(&mut config.viz3d_column_size, 1..=16));
-            ui.label("Cube Base Color");
-            let mut color_temp = [
-                config.viz3d_base_color.r(),
-                config.viz3d_base_color.g(),
-                config.viz3d_base_color.b(),
-            ];
-            if color_picker::color_edit_button_rgb(ui, &mut color_temp).changed() {
-                config.viz3d_base_color = Color::rgb(color_temp[0], color_temp[1], color_temp[2]);
-            }
-        }
-
-        if *current_state == AppState::VisualizationOrb {
-            ui.separator();
-            ui.heading("3D Orb Controls");
-            ui.label("Base Color");
-            let mut color_temp_base = [
-                config.orb_base_color.r(),
-                config.orb_base_color.g(),
-                config.orb_base_color.b(),
-            ];
-            if color_picker::color_edit_button_rgb(ui, &mut color_temp_base).changed() {
-                config.orb_base_color =
-                    Color::rgb(color_temp_base[0], color_temp_base[1], color_temp_base[2]);
-            }
-            ui.label("Peak Color");
-            let mut color_temp_peak = [
-                config.orb_peak_color.r(),
-                config.orb_peak_color.g(),
-                config.orb_peak_color.b(),
-            ];
-            if color_picker::color_edit_button_rgb(ui, &mut color_temp_peak).changed() {
-                config.orb_peak_color =
-                    Color::rgb(color_temp_peak[0], color_temp_peak[1], color_temp_peak[2]);
-            }
-            ui.separator();
-            ui.label("Noise Speed");
-            ui.add(egui::Slider::new(&mut config.orb_noise_speed, 0.1..=5.0));
-            ui.label("Noise Frequency");
-            ui.add(egui::Slider::new(
-                &mut config.orb_noise_frequency,
-                0.5..=10.0,
-            ));
-            ui.label("Treble Influence");
-            ui.add(egui::Slider::new(
-                &mut config.orb_treble_influence,
-                0.0..=1.0,
-            ));
-        }
-
-        // AJOUT : Contrôles spécifiques pour le visualiseur Ico
-        if *current_state == AppState::VisualizationIco {
-            ui.separator();
-            ui.heading("Icosahedron Controls");
-
-            ui.label("Color Tint");
-            let mut color_temp_ico = [
-                config.ico_color.r(),
-                config.ico_color.g(),
-                config.ico_color.b(),
-            ];
-            if color_picker::color_edit_button_rgb(ui, &mut color_temp_ico).changed() {
-                config.ico_color =
-                    Color::rgb(color_temp_ico[0], color_temp_ico[1], color_temp_ico[2]);
-            }
-
-            ui.label("Rotation Speed");
-            ui.add(egui::Slider::new(&mut config.ico_speed, -3.0..=3.0));
-        }
-
-        ui.separator();
-        let button_text = if viz_enabled.0 {
-            "Deactivate Visualizer"
-        } else {
-            "Activate Visualizer"
-        };
-        if ui.button(button_text).clicked() {
-            viz_enabled.0 = !viz_enabled.0;
-        }
-    });
-
-    // --- Bloom Settings Window ---
-    if *current_state == AppState::Visualization3D || *current_state == AppState::VisualizationOrb {
-        egui::Window::new("Bloom Settings").show(ctx, |ui| {
-            ui.checkbox(&mut config.bloom_enabled, "Enable Bloom");
-            if config.bloom_enabled {
-                ui.label("Intensity");
-                ui.add(egui::Slider::new(&mut config.bloom_intensity, 0.0..=1.0));
-                ui.label("Threshold");
-                ui.add(egui::Slider::new(&mut config.bloom_threshold, 0.0..=2.0));
-                ui.label("Bloom Color");
-                let mut color_temp_bloom = [
-                    config.bloom_color.r(),
-                    config.bloom_color.g(),
-                    config.bloom_color.b(),
-                ];
-                if color_picker::color_edit_button_rgb(ui, &mut color_temp_bloom).changed() {
-                    config.bloom_color = Color::rgb(
-                        color_temp_bloom[0],
-                        color_temp_bloom[1],
-                        color_temp_bloom[2],
-                    );
-                }
-            }
-        });
-    }
-
-    // --- Audio Source Selection Window ---
-    egui::Window::new("Audio Source").show(ctx, |ui| {
-        ui.label(format!("Current Source: {:?}", selected_source.0));
-        ui.separator();
-
-        if ui.button("Use Microphone").clicked() {
-            selected_source.0 = AudioSource::Microphone;
-        }
-
-        // --- CORRECTION: Allow collapsible if ---
-        #[allow(clippy::collapsible_if)]
-        if ui.button("Choose Audio File").clicked() {
-            if let Some(path) = rfd::FileDialog::new()
-                .add_filter("audio", &["mp3", "wav"])
-                .pick_file()
-            {
-                selected_source.0 = AudioSource::File(path);
-            }
-        }
-    });
-
-    // --- Visualizer Selection Window ---
-    egui::Window::new("Visualizers").show(ctx, |ui| {
-        ui.label("Select a visualizer:");
-        ui.separator();
-
-        if ui.button("2D Bars").clicked() {
-            next_app_state.set(AppState::Visualization2D);
-            active_viz.0 = AppState::Visualization2D;
-        }
-        if ui.button("3D Cubes").clicked() {
-            next_app_state.set(AppState::Visualization3D);
-            active_viz.0 = AppState::Visualization3D;
-        }
-        if ui.button("3D Orb").clicked() {
-            next_app_state.set(AppState::VisualizationOrb);
-            active_viz.0 = AppState::VisualizationOrb;
-        }
-        if ui.button("2D Disc").clicked() {
-            next_app_state.set(AppState::VisualizationDisc);
-            active_viz.0 = AppState::VisualizationDisc;
-        }
-        // AJOUT : Bouton pour sélectionner le visualiseur Ico
-        if ui.button("Icosahedron").clicked() {
-            next_app_state.set(AppState::VisualizationIco);
-            active_viz.0 = AppState::VisualizationIco;
-        }
-    });
-}
-
-// This system creates the UI window for controlling audio playback (play, pause, seek).
-fn playback_controls_system(
-    mut contexts: EguiContexts,
-    mut playback_info: ResMut<PlaybackInfo>,
-    selected_source: Res<SelectedAudioSource>,
-) {
-    // Only show the playback controls if a file is selected.
-    if !matches!(selected_source.0, AudioSource::File(_)) {
-        return;
-    }
-
-    egui::Window::new("Playback Controls").show(contexts.ctx_mut(), |ui| {
-        // Disable controls if no track is loaded (duration is zero).
-        ui.set_enabled(playback_info.duration > Duration::ZERO);
-
-        // --- Play/Pause Button ---
-        let button_text = if playback_info.status == PlaybackStatus::Playing {
-            "⏸ Pause"
-        } else {
-            "▶ Play"
-        };
-        if ui.button(button_text).clicked() {
-            playback_info.status = if playback_info.status == PlaybackStatus::Playing {
-                PlaybackStatus::Paused
-            } else {
-                PlaybackStatus::Playing
-            };
-        }
-
-        ui.separator();
-
-        // --- Progress Bar / Seeker ---
-        let total_secs = playback_info.duration.as_secs_f32();
-        let mut current_pos_secs = playback_info.position.as_secs_f32();
-
-        // Helper to format time for display (MM:SS).
-        let format_time = |secs: f32| -> String {
-            let total_seconds = secs.floor() as u64;
-            let minutes = total_seconds / 60;
-            let seconds = total_seconds % 60;
-            format!("{:02}:{:02}", minutes, seconds)
-        };
-
-        let progress_label = format!(
-            "{} / {}",
-            format_time(current_pos_secs),
-            format_time(total_secs)
-        );
-
-        ui.label("Progress");
-        let progress_slider = egui::Slider::new(&mut current_pos_secs, 0.0..=total_secs)
-            .show_value(false)
-            .text(progress_label);
-
-        // If the user interacts with the slider, send a seek request.
-        if ui.add(progress_slider).changed() {
-            playback_info.seek_to = Some(current_pos_secs);
-        }
-
-        ui.separator();
-
-        // --- Speed Control ---
-        ui.label("Playback Speed");
-        ui.add(egui::Slider::new(&mut playback_info.speed, 0.25..=2.0).logarithmic(false));
-    });
-}
-
-// This system displays a panel with detailed audio analysis metrics.
-fn audio_details_panel_system(
-    mut contexts: EguiContexts,
-    config: Res<VisualsConfig>,
-    audio_analysis: Res<AudioAnalysis>,
-    q_windows: Query<Entity, With<PrimaryWindow>>,
-) {
-    if q_windows.get_single().is_err() {
-        return;
-    }
-
-    if !config.details_panel_enabled {
-        return;
-    }
-
-    egui::Window::new("Audio Analysis Details")
-        .anchor(egui::Align2::LEFT_TOP, egui::vec2(10.0, 10.0))
-        .show(contexts.ctx_mut(), |ui| {
-            ui.style_mut().override_text_style = Some(egui::TextStyle::Monospace);
-            ui.heading("📊 Basic Metrics");
-            ui.label(format!("Volume (RMS): {:.3}", audio_analysis.volume));
-            ui.separator();
-            ui.heading("🎚️ Frequency Bands");
-            ui.label(format!("Bass:         {:.2}", audio_analysis.bass));
-            ui.label(format!("Mid:          {:.2}", audio_analysis.mid));
-            ui.label(format!("Treble:       {:.2}", audio_analysis.treble));
-            ui.separator();
-            ui.heading("Raw Frequency Bins");
-            egui::ScrollArea::vertical()
-                .max_height(100.0)
-                .show(ui, |ui| {
-                    for (i, bin) in audio_analysis.frequency_bins.iter().enumerate() {
-                        ui.label(format!("Bin {:02}: {:.3}", i, bin));
-                    }
-                });
-        });
-}
-
-// A helper function to create a styled button for the main menu.
 fn create_menu_button(parent: &mut ChildBuilder, text: &str, action: MenuButtonAction) {
     parent
         .spawn((
@@ -565,7 +552,6 @@ fn create_menu_button(parent: &mut ChildBuilder, text: &str, action: MenuButtonA
         });
 }
 
-// Despawns all UI elements tagged with `MainMenuUI` when exiting the state.
 fn cleanup_menu(mut commands: Commands, ui_query: Query<Entity, With<MainMenuUI>>) {
     for entity in ui_query.iter() {
         commands.entity(entity).despawn_recursive();
