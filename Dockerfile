@@ -11,7 +11,7 @@ RUN apt-get update && apt-get install -y \
     libxi-dev \
     libxrandr-dev \
     libwayland-dev \
-    libxkbcommon-dev \
+    libxkbcommon-dev
 
 WORKDIR /usr/src/app
 COPY . .
