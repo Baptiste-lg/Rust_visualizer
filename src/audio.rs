@@ -96,37 +96,37 @@ impl Plugin for AudioPlugin {
             Duration::from_secs_f32(1.0 / 60.0),
             TimerMode::Repeating,
         )))
-            .insert_resource(MicAudioSender(mic_tx))
-            .insert_non_send_resource(MicAudioReceiver(mic_rx))
-            .insert_resource(AnalysisAudioSender(analysis_tx))
-            .insert_non_send_resource(AnalysisAudioReceiver(analysis_rx))
-            .init_resource::<AudioSamples>()
-            .init_resource::<AudioAnalysis>()
-            .init_resource::<SelectedMic>()
-            .init_resource::<MicAudioBuffer>()
-            .add_systems(
-                Update,
-                (
-                    read_mic_data_system,
-                    read_analysis_data_system,
-                    manage_audio_playback,
-                    apply_playback_changes.after(manage_audio_playback),
-                    update_playback_position.after(apply_playback_changes),
-                    audio_analysis_system
-                        .after(read_mic_data_system)
-                        .after(read_analysis_data_system)
-                        .after(manage_audio_playback)
-                        .run_if(|viz_enabled: Res<VisualizationEnabled>| viz_enabled.0),
-                )
-                    .run_if(
-                        in_state(AppState::Visualization2D)
-                            .or_else(in_state(AppState::Visualization3D))
-                            .or_else(in_state(AppState::VisualizationOrb))
-                            .or_else(in_state(AppState::VisualizationDisc))
-                            // AJOUT : On active l'audio aussi pour l'Ico
-                            .or_else(in_state(AppState::VisualizationIco)),
-                    ),
-            );
+        .insert_resource(MicAudioSender(mic_tx))
+        .insert_non_send_resource(MicAudioReceiver(mic_rx))
+        .insert_resource(AnalysisAudioSender(analysis_tx))
+        .insert_non_send_resource(AnalysisAudioReceiver(analysis_rx))
+        .init_resource::<AudioSamples>()
+        .init_resource::<AudioAnalysis>()
+        .init_resource::<SelectedMic>()
+        .init_resource::<MicAudioBuffer>()
+        .add_systems(
+            Update,
+            (
+                read_mic_data_system,
+                read_analysis_data_system,
+                manage_audio_playback,
+                apply_playback_changes.after(manage_audio_playback),
+                update_playback_position.after(apply_playback_changes),
+                audio_analysis_system
+                    .after(read_mic_data_system)
+                    .after(read_analysis_data_system)
+                    .after(manage_audio_playback)
+                    .run_if(|viz_enabled: Res<VisualizationEnabled>| viz_enabled.0),
+            )
+                .run_if(
+                    in_state(AppState::Visualization2D)
+                        .or_else(in_state(AppState::Visualization3D))
+                        .or_else(in_state(AppState::VisualizationOrb))
+                        .or_else(in_state(AppState::VisualizationDisc))
+                        // AJOUT : On active l'audio aussi pour l'Ico
+                        .or_else(in_state(AppState::VisualizationIco)),
+                ),
+        );
     }
 }
 
@@ -483,7 +483,7 @@ pub fn audio_analysis_system(
         FrequencyLimit::Range(20.0, 20000.0),
         Some(&divide_by_N_sqrt),
     )
-        .expect("Failed to compute spectrum");
+    .expect("Failed to compute spectrum");
 
     let squared_sum = samples_slice.iter().map(|s| s * s).sum::<f32>();
     audio_analysis.volume = (squared_sum / samples_slice.len() as f32).sqrt();

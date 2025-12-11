@@ -28,13 +28,13 @@ struct IcoScene;
 #[repr(C)]
 pub struct IcoMaterial {
     #[uniform(0)]
-    pub color: Vec4,             // r, g, b, a
+    pub color: Vec4, // r, g, b, a
     #[uniform(0)]
-    pub resolution_mouse: Vec4,  // x=width, y=height, z=mouseX, w=mouseY
+    pub resolution_mouse: Vec4, // x=width, y=height, z=mouseX, w=mouseY
     #[uniform(0)]
-    pub time_params: Vec4,       // x=time, y=speed, z=ZOOM (camera scale), w=unused
+    pub time_params: Vec4, // x=time, y=speed, z=ZOOM (camera scale), w=unused
     #[uniform(0)]
-    pub audio_params: Vec4,      // x=bass, y=mid, z=treble, w=flux
+    pub audio_params: Vec4, // x=bass, y=mid, z=treble, w=flux
 }
 
 impl Material2d for IcoMaterial {
@@ -102,12 +102,7 @@ fn update_ico_material(
     for (_, material) in materials.iter_mut() {
         material.color = Vec4::from(config.ico_color.as_linear_rgba_f32());
 
-        material.resolution_mouse = Vec4::new(
-            width,
-            height,
-            mouse.x,
-            height - mouse.y,
-        );
+        material.resolution_mouse = Vec4::new(width, height, mouse.x, height - mouse.y);
 
         material.time_params.x = time.elapsed_seconds();
         material.time_params.y = config.ico_speed;
