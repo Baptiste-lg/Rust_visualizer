@@ -1,4 +1,4 @@
-use crate::{AppState, config::VisualsConfig, camera::MainCamera2D}; // Ajout import camera
+use crate::{AppState, camera::MainCamera2D, config::VisualsConfig}; // Ajout import camera
 use bevy::{
     prelude::*,
     reflect::TypePath,

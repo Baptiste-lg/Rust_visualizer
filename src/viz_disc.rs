@@ -29,29 +29,29 @@ struct DiscScene;
 #[repr(C)]
 pub struct DiscMaterial {
     #[uniform(0)]
-    color: Vec4,                 // 16 bytes (offset 0)
+    color: Vec4, // 16 bytes (offset 0)
     #[uniform(0)]
-    time: f32,                   // 4 bytes  (offset 16)
+    time: f32, // 4 bytes  (offset 16)
     #[uniform(0)]
-    radius: f32,                 // 4 bytes  (offset 20)
+    radius: f32, // 4 bytes  (offset 20)
     #[uniform(0)]
-    line_thickness: f32,         // 4 bytes  (offset 24)
+    line_thickness: f32, // 4 bytes  (offset 24)
     #[uniform(0)]
-    iterations: f32,             // 4 bytes  (offset 28)
+    iterations: f32, // 4 bytes  (offset 28)
     #[uniform(0)]
-    speed: f32,                  // 4 bytes  (offset 32)
+    speed: f32, // 4 bytes  (offset 32)
     #[uniform(0)]
-    center_radius_factor: f32,   // 4 bytes  (offset 36)
+    center_radius_factor: f32, // 4 bytes  (offset 36)
     #[uniform(0)]
-    resolution: Vec2,            // 8 bytes  (offset 40)
+    resolution: Vec2, // 8 bytes  (offset 40)
     #[uniform(0)]
-    bass: f32,                   // 4 bytes  (offset 48)
+    bass: f32, // 4 bytes  (offset 48)
     #[uniform(0)]
-    flux: f32,                   // 4 bytes  (offset 52)
+    flux: f32, // 4 bytes  (offset 52)
     #[uniform(0)]
-    zoom: f32,                   // 4 bytes  (offset 56)
+    zoom: f32, // 4 bytes  (offset 56)
     #[uniform(0)]
-    _padding: f32,               // 4 bytes  (offset 60 -> 64 total)
+    _padding: f32, // 4 bytes  (offset 60 -> 64 total)
 }
 
 impl Material2d for DiscMaterial {
