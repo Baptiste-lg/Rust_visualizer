@@ -1,0 +1,53 @@
+name: Docker Build & Push
+
+# Ce workflow se déclenche uniquement quand le workflow "Rust Visualizer CI/CD" est TERMINÉ
+on:
+  workflow_run:
+    workflows: ["Rust Visualizer CI/CD"] # Doit être identique au 'name:' dans Ci.yml
+    types:
+      - completed
+
+permissions:
+  contents: read
+  packages: write # Nécessaire pour publier sur GitHub Container Registry (GHCR)
+
+jobs:
+  build-and-push:
+    # On ne lance le job que si le workflow précédent a réussi (succès des tests)
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+
+    steps:
+      # On récupère le code source correspondant au commit qui a déclenché la CI
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      # Connexion au registre de conteneurs de GitHub (gratuit et privé par défaut)
+      - name: Log in to the Container registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Génération automatique des tags Docker (ex: main, v5.0.0, sha-1234)
+      - name: Extract metadata (tags, labels) for Docker
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=tag
+            type=sha,format=long
+
+      # Construction et Envoi de l'image (Build & Push)
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
