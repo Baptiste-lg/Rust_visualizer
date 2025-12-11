@@ -15,7 +15,7 @@ mod viz_orb;
 use crate::audio::{AudioPlugin, MicStream, PlaybackInfo, SelectedAudioSource};
 use crate::camera::CameraPlugin;
 use crate::config::VisualsConfig;
-use crate::ui::{UiPlugin, UiVisibility}; // <--- Import UiVisibility
+use crate::ui::{UiPlugin, UiVisibility};
 use crate::viz_2d::Viz2DPlugin;
 use crate::viz_3d::Viz3DPlugin;
 use crate::viz_disc::VizDiscPlugin;
@@ -70,7 +70,7 @@ fn main() {
         .init_resource::<VisualizationEnabled>()
         .init_resource::<ActiveVisualization>()
         .init_resource::<PlaybackInfo>()
-        .init_resource::<UiVisibility>() // <--- AJOUT ICI : Initialisation de la ressource
+        .init_resource::<UiVisibility>()
         .init_state::<AppState>()
         .add_plugins((
             EguiPlugin,

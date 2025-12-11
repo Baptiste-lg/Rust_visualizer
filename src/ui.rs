@@ -12,7 +12,7 @@ use bevy_egui::{EguiContexts, EguiSet, egui};
 use cpal::traits::{DeviceTrait, HostTrait};
 use std::time::Duration;
 
-// Une ressource pour savoir si l'UI est affichée ou cachée
+// A resource to know if the UI is shown or hidden
 #[derive(Resource)]
 pub struct UiVisibility {
     pub visible: bool,
@@ -43,8 +43,8 @@ impl Plugin for UiPlugin {
             .add_systems(
                 Update,
                 (
-                    toggle_ui_visibility, // Système pour la touche 'H'
-                    main_ui_layout,       // Le gros système qui gère les panneaux
+                    toggle_ui_visibility, // System for 'H' key
+                    main_ui_layout,       // The main system handling panels
                 )
                     .after(EguiSet::InitContexts)
                     .run_if(
@@ -58,7 +58,7 @@ impl Plugin for UiPlugin {
     }
 }
 
-// --- Composants Menu Principal (Inchangés) ---
+// --- Main Menu Components (Unchanged) ---
 #[derive(Component)]
 enum MenuButtonAction {
     Start,
@@ -70,15 +70,14 @@ struct MainMenuUI;
 #[derive(Component)]
 struct MicDeviceButton(String);
 
-// --- Système de Toggle UI ---
+// --- UI Toggle System ---
 fn toggle_ui_visibility(keyboard: Res<ButtonInput<KeyCode>>, mut ui_viz: ResMut<UiVisibility>) {
-    // CORRECTION 1: Bevy 0.14 utilise KeyCode::KeyH au lieu de KeyCode::H
     if keyboard.just_pressed(KeyCode::KeyH) {
         ui_viz.visible = !ui_viz.visible;
     }
 }
 
-// --- Système Principal d'UI (Layout & Contenu) ---
+// --- Main UI System (Layout & Content) ---
 #[allow(clippy::too_many_arguments)]
 fn main_ui_layout(
     mut contexts: EguiContexts,
@@ -113,14 +112,14 @@ fn main_ui_layout(
             });
         });
 
-    // Si l'UI est cachée, on arrête ici
+    // If UI is hidden, stop here
     if !ui_visibility.visible {
         return;
     }
 
     let current_state = app_state.get();
 
-    // --- PANNEAU GAUCHE : Paramètres du Visualiseur Actif ---
+    // --- LEFT PANEL: Active Visualizer Settings ---
     egui::SidePanel::left("viz_settings_panel")
         .resizable(true)
         .default_width(250.0)
@@ -129,13 +128,13 @@ fn main_ui_layout(
             ui.heading("🎨 Visualizer Settings");
             ui.separator();
 
-            // Paramètre Global
+            // Global Parameter
             ui.label("Amplitude Sensitivity");
             ui.add(egui::Slider::new(&mut config.bass_sensitivity, 0.1..=10.0));
 
             ui.separator();
 
-            // Paramètres Contextuels
+            // Contextual Parameters
             egui::ScrollArea::vertical().show(ui, |ui| match current_state {
                 AppState::Visualization2D => {
                     ui.label("Inactive Color");
@@ -220,7 +219,7 @@ fn main_ui_layout(
             });
         });
 
-    // --- PANNEAU DROIT : Contrôles Globaux ---
+    // --- RIGHT PANEL: Global Controls ---
     egui::SidePanel::right("global_controls_panel")
         .resizable(true)
         .default_width(250.0)
@@ -229,7 +228,7 @@ fn main_ui_layout(
             ui.heading("🎛 Controls");
             ui.separator();
 
-            // Choix du Visualiseur
+            // Visualizer Choice
             ui.label("Select Visualizer:");
             ui.horizontal_wrapped(|ui| {
                 if ui
@@ -271,7 +270,7 @@ fn main_ui_layout(
 
             ui.separator();
 
-            // Toggle On/Off global
+            // Global Toggle On/Off
             let btn_text = if viz_enabled.0 {
                 "⏹ Stop Render"
             } else {
@@ -288,7 +287,6 @@ fn main_ui_layout(
                 selected_source.0 = AudioSource::Microphone;
             }
 
-            // FIX: Fusion des if imbriqués pour satisfaire clippy::collapsible_if
             if ui.button("📂 Load File").clicked()
                 && let Some(path) = rfd::FileDialog::new()
                     .add_filter("audio", &["mp3", "wav"])
@@ -297,7 +295,7 @@ fn main_ui_layout(
                 selected_source.0 = AudioSource::File(path);
             }
 
-            // Playback Controls (Si fichier)
+            // Playback Controls (If file)
             if let AudioSource::File(_) = selected_source.0 {
                 ui.separator();
                 ui.label("Playback:");
@@ -340,7 +338,7 @@ fn main_ui_layout(
             ui.separator();
             ui.checkbox(&mut config.details_panel_enabled, "Show Analysis Data");
 
-            // Panneau de détails intégré (au lieu d'une fenêtre flottante)
+            // Integrated details panel (instead of floating window)
             if config.details_panel_enabled {
                 ui.separator();
                 ui.label(egui::RichText::new("Analysis Data").strong());
@@ -367,16 +365,13 @@ fn render_bloom_ui(ui: &mut egui::Ui, config: &mut VisualsConfig) {
     }
 }
 
-// CORRECTION 3: Adaptation complète pour egui 0.27+ et Bevy Color
+// Adaptation for egui 0.27+ and Bevy Color
 fn color_picker_widget(ui: &mut egui::Ui, color: &mut Color) {
-    // 1. Conversion Bevy Color -> [f32; 4]
-    // Note: Si tu es sur Bevy 0.14 strict, color.r() n'existe peut-être pas directement
-    // mais si ton code compilait avant (hors egui), on suppose que ça passe ou que tu as un trait.
-    // Sinon, utilise `color.to_linear().red` etc.
+    // 1. Convert Bevy Color -> [f32; 4]
     let rgba_array = [color.r(), color.g(), color.b(), color.a()];
 
-    // 2. Création d'une couleur Egui (Rgba est premultiplied par défaut)
-    // On utilise from_rgba_unmultiplied car nos inputs sont linéaires/unmultiplied
+    // 2. Create Egui color (Rgba is premultiplied by default)
+    // We use from_rgba_unmultiplied because our inputs are linear/unmultiplied
     let mut egui_color = egui::Rgba::from_rgba_unmultiplied(
         rgba_array[0],
         rgba_array[1],
@@ -384,17 +379,17 @@ fn color_picker_widget(ui: &mut egui::Ui, color: &mut Color) {
         rgba_array[3],
     );
 
-    // 3. Affichage du widget
+    // 3. Display Widget
     if color_picker::color_edit_button_rgba(ui, &mut egui_color, color_picker::Alpha::Opaque)
         .changed()
     {
-        // 4. Conversion retour vers Bevy Color
+        // 4. Convert back to Bevy Color
         let result = egui_color.to_rgba_unmultiplied();
         *color = Color::rgba(result[0], result[1], result[2], result[3]);
     }
 }
 
-// --- Setup Main Menu (Inchangé) ---
+// --- Setup Main Menu (Unchanged) ---
 fn setup_main_menu(mut commands: Commands) {
     commands.spawn((Camera2dBundle::default(), MainMenuUI));
     commands
