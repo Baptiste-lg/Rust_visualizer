@@ -10,37 +10,53 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  build-and-test:
-    name: Build, Test & Lint
+  # Job 1: Check code formatting
+  formatting:
+    name: Check Formatting
     runs-on: self-hosted
-
     steps:
-      # 1. Checkout the repository content
       - name: Checkout code
         uses: actions/checkout@v4
-
-      # 2. Verify the Rust toolchain version
-      - name: Ensure Rust toolchain
-        run: rustup show
-
-      # 3. Check code formatting (style compliance)
       - name: Check Formatting
         run: cargo fmt -- --check
 
-      # 4. Run Clippy linter to catch common mistakes and improve code quality
-      # Fails if any warnings are found (-D warnings)
+  # Job 2: Run linter (Clippy) to catch common mistakes
+  linting:
+    name: Run Clippy
+    runs-on: self-hosted
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
       - name: Run Clippy (Linting)
         run: cargo clippy -- -D warnings
 
-      # 5. Run unit and integration tests
+  # Job 3: Run unit and integration tests
+  testing:
+    name: Run Tests
+    runs-on: self-hosted
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
       - name: Run tests
         run: cargo test --verbose
 
-      # 6. Build the project in release mode for optimized performance
+  # Job 4: Build Release & Upload Artifact
+  # This job only runs if formatting, linting, and testing are successful
+  build:
+    name: Build Release
+    runs-on: self-hosted
+    needs: [formatting, linting, testing]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # Verify the Rust toolchain version
+      - name: Ensure Rust toolchain
+        run: rustup show
+
       - name: Build Release
         run: cargo build --release --verbose
 
-      # 7. Upload the compiled binary as an artifact for download
       - name: Upload Binary Artifact
         uses: actions/upload-artifact@v4
         with:
