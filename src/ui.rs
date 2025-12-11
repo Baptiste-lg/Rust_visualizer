@@ -16,18 +16,19 @@ use std::time::Duration;
 #[derive(Resource)]
 pub struct UiVisibility {
     pub visible: bool,
-    pub hint_timer: Timer, // <--- AJOUT
+    pub hint_timer: Timer,
 }
 
 impl Default for UiVisibility {
     fn default() -> Self {
         Self {
             visible: true,
-            // Le timer est configuré pour 10 secondes, mode "Once" (pas de boucle)
-            hint_timer: Timer::from_seconds(10.0, TimerMode::Once),
+            // Timer set to 5 seconds, runs once
+            hint_timer: Timer::from_seconds(5.0, TimerMode::Once),
         }
     }
 }
+
 pub struct UiPlugin;
 
 impl Plugin for UiPlugin {
@@ -79,7 +80,7 @@ fn toggle_ui_visibility(keyboard: Res<ButtonInput<KeyCode>>, mut ui_viz: ResMut<
     if keyboard.just_pressed(KeyCode::KeyH) {
         ui_viz.visible = !ui_viz.visible;
 
-        // Si on vient de cacher l'UI, on relance le timer du message
+        // If we just hid the UI, reset the timer to show the hint for 10s
         if !ui_viz.visible {
             ui_viz.hint_timer.reset();
         }
@@ -94,7 +95,9 @@ fn main_ui_layout(
     mut selected_source: ResMut<SelectedAudioSource>,
     mut viz_enabled: ResMut<VisualizationEnabled>,
     mut playback_info: ResMut<PlaybackInfo>,
+    // CHANGED: ResMut to allow timer update
     mut ui_visibility: ResMut<UiVisibility>,
+    // CHANGED: Added Time resource
     time: Res<Time>,
     audio_analysis: Res<AudioAnalysis>,
     app_state: Res<State<AppState>>,
@@ -105,32 +108,33 @@ fn main_ui_layout(
     if q_windows.get_single().is_err() {
         return;
     }
-    if !ui_visibility.visible {
-        ui_visibility.hint_timer.tick(time.delta());
-    }
 
     let ctx = contexts.ctx_mut();
 
-    egui::Area::new("ui_toggle_hint".into())
-        .anchor(egui::Align2::CENTER_TOP, egui::vec2(0.0, 10.0))
-        .show(ctx, |ui| {
-            ui.visuals_mut().widgets.noninteractive.bg_fill = egui::Color32::from_black_alpha(150);
-            ui.visuals_mut().widgets.noninteractive.fg_stroke =
-                egui::Stroke::new(1.0, egui::Color32::WHITE);
-            egui::Frame::default().inner_margin(5.0).show(ui, |ui| {
-                if ui_visibility.visible {
-                    ui.label("Press 'H' to Hide UI");
-                } else if !ui_visibility.hint_timer.finished() {
-                    ui.label("Press 'H' to Show UI");
-                }
-            });
-        });
-
-    // If UI is hidden, stop here
+    // 1. LOGIC WHEN UI IS HIDDEN
     if !ui_visibility.visible {
+        // Update the timer
+        ui_visibility.hint_timer.tick(time.delta());
+
+        // Only show the floating hint if the timer is NOT finished
+        if !ui_visibility.hint_timer.finished() {
+            egui::Area::new("ui_hidden_hint".into())
+                .anchor(egui::Align2::CENTER_TOP, egui::vec2(0.0, 10.0))
+                .show(ctx, |ui| {
+                    ui.visuals_mut().widgets.noninteractive.bg_fill =
+                        egui::Color32::from_black_alpha(150);
+                    ui.visuals_mut().widgets.noninteractive.fg_stroke =
+                        egui::Stroke::new(1.0, egui::Color32::WHITE);
+                    egui::Frame::default().inner_margin(8.0).show(ui, |ui| {
+                        ui.label(egui::RichText::new("Press 'H' to Show UI").size(16.0));
+                    });
+                });
+        }
+        // Stop here, don't render panels
         return;
     }
 
+    // 2. LOGIC WHEN UI IS VISIBLE (Panels)
     let current_state = app_state.get();
 
     // --- LEFT PANEL: Active Visualizer Settings ---
@@ -352,7 +356,7 @@ fn main_ui_layout(
             ui.separator();
             ui.checkbox(&mut config.details_panel_enabled, "Show Analysis Data");
 
-            // Integrated details panel (instead of floating window)
+            // Integrated details panel
             if config.details_panel_enabled {
                 ui.separator();
                 ui.label(egui::RichText::new("Analysis Data").strong());
@@ -363,6 +367,13 @@ fn main_ui_layout(
                 ui.label(format!("Treble: {:.2}", audio_analysis.treble));
                 ui.label(format!("Flux:   {:.2}", audio_analysis.flux));
             }
+
+            // --- BOTTOM SECTION: Hide UI Hint ---
+            ui.add_space(20.0);
+            ui.separator();
+            ui.vertical_centered(|ui| {
+                ui.label(egui::RichText::new("Press 'H' to Hide UI").weak().italics());
+            });
         });
 }
 
@@ -385,7 +396,6 @@ fn color_picker_widget(ui: &mut egui::Ui, color: &mut Color) {
     let rgba_array = [color.r(), color.g(), color.b(), color.a()];
 
     // 2. Create Egui color (Rgba is premultiplied by default)
-    // We use from_rgba_unmultiplied because our inputs are linear/unmultiplied
     let mut egui_color = egui::Rgba::from_rgba_unmultiplied(
         rgba_array[0],
         rgba_array[1],
@@ -445,7 +455,6 @@ fn menu_button_interaction(
         if *interaction == Interaction::Pressed {
             match action {
                 MenuButtonAction::Start => {
-                    // Transition to the last active visualization.
                     next_app_state.set(active_viz.0.clone());
                 }
                 MenuButtonAction::ToMicSelection => {
