@@ -1,4 +1,4 @@
-use crate::{AppState, camera::MainCamera2D, config::VisualsConfig}; // Ajout import camera
+use crate::{AppState, audio::AudioAnalysis, camera::MainCamera2D, config::VisualsConfig};
 use bevy::{
     prelude::*,
     reflect::TypePath,
@@ -28,11 +28,13 @@ struct IcoScene;
 #[repr(C)]
 pub struct IcoMaterial {
     #[uniform(0)]
-    pub color: Vec4, // r, g, b, a
+    pub color: Vec4,             // r, g, b, a
     #[uniform(0)]
-    pub resolution_mouse: Vec4, // x=width, y=height, z=mouseX, w=mouseY
+    pub resolution_mouse: Vec4,  // x=width, y=height, z=mouseX, w=mouseY
     #[uniform(0)]
-    pub time_params: Vec4, // x=time, y=speed, z=ZOOM (camera scale), w=unused
+    pub time_params: Vec4,       // x=time, y=speed, z=ZOOM (camera scale), w=unused
+    #[uniform(0)]
+    pub audio_params: Vec4,      // x=bass, y=mid, z=treble, w=flux
 }
 
 impl Material2d for IcoMaterial {
@@ -49,17 +51,19 @@ fn setup_ico_scene(
 ) {
     let quad_handle = meshes.add(Rectangle::new(1.0, 1.0));
 
+    // Initialisation avec des valeurs par défaut
     let material_handle = materials.add(IcoMaterial {
         color: Vec4::from(config.ico_color.as_linear_rgba_f32()),
         resolution_mouse: Vec4::new(800.0, 600.0, 0.0, 0.0),
         time_params: Vec4::new(0.0, config.ico_speed, 1.0, 0.0),
+        audio_params: Vec4::ZERO,
     });
 
     commands.spawn((
         MaterialMesh2dBundle {
             mesh: quad_handle.into(),
             material: material_handle,
-            // Le quad couvre tout l'écran
+            // Quad très grand pour couvrir l'écran
             transform: Transform::from_xyz(0.0, 0.0, 0.0).with_scale(Vec3::splat(10_000.0)),
             ..default()
         },
@@ -70,29 +74,30 @@ fn setup_ico_scene(
 fn update_ico_material(
     time: Res<Time>,
     config: Res<VisualsConfig>,
+    audio_analysis: Res<AudioAnalysis>,
     mut materials: ResMut<Assets<IcoMaterial>>,
     q_window: Query<&Window, With<PrimaryWindow>>,
-    q_camera: Query<&OrthographicProjection, With<MainCamera2D>>, // On récupère la caméra
+    q_camera: Query<&OrthographicProjection, With<MainCamera2D>>,
 ) {
     let Ok(window) = q_window.get_single() else {
         return;
     };
 
-    // CORRECTION MAJEURE : Utilisation de la résolution PHYSIQUE
-    // mesh.position dans le shader correspond aux pixels physiques.
-    // Si on envoie la taille logique (width/height), le shader décale tout sur les écrans HDPI.
     let width = window.resolution.physical_width() as f32;
     let height = window.resolution.physical_height() as f32;
-
-    // On récupère la souris (optionnel pour d'autres effets, mais plus pour le zoom)
     let mouse = window.cursor_position().unwrap_or(Vec2::ZERO);
 
-    // Récupération du zoom (scale) de la caméra contrôlé par la molette
     let zoom_level = if let Ok(projection) = q_camera.get_single() {
         projection.scale
     } else {
         1.0
     };
+
+    // --- LOGIQUE DE SENSIBILITÉ ---
+    // On récupère la sensibilité de l'UI (par défaut 4.0)
+    // On multiplie par 0.05 (équivalent à diviser par 20) pour réduire drastiquement l'effet de base.
+    // Ainsi, à 4.0, on a un facteur de 0.2, ce qui est beaucoup plus doux.
+    let sensitivity = config.bass_sensitivity * 0.03;
 
     for (_, material) in materials.iter_mut() {
         material.color = Vec4::from(config.ico_color.as_linear_rgba_f32());
@@ -101,14 +106,20 @@ fn update_ico_material(
             width,
             height,
             mouse.x,
-            // On envoie la coordonnée Y inversée au cas où, mais moins critique ici
             height - mouse.y,
         );
 
         material.time_params.x = time.elapsed_seconds();
         material.time_params.y = config.ico_speed;
-        // On injecte le zoom caméra dans le paramètre Z
         material.time_params.z = zoom_level;
+
+        // On applique le facteur 'sensitivity' à toutes les bandes
+        material.audio_params = Vec4::new(
+            audio_analysis.bass * sensitivity,
+            audio_analysis.mid * sensitivity,
+            audio_analysis.treble * sensitivity,
+            audio_analysis.flux * sensitivity,
+        );
     }
 }
 

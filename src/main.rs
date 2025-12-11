@@ -70,7 +70,6 @@ fn main() {
     let (stream, stream_handle) = OutputStream::try_default().unwrap();
 
     app.add_plugins(DefaultPlugins)
-        .insert_resource(ClearColor(Color::GRAY)) // <--- AJOUTE CECI
         // Insert audio resources required for playback and analysis.
         .insert_non_send_resource(stream)
         .insert_non_send_resource(Sink::try_new(&stream_handle).unwrap())
