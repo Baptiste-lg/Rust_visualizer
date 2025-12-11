@@ -1,7 +1,9 @@
-# Étape 1 : Construction (Builder)
-# On utilise l'image officielle Rust pour compiler
+# Stage 1: Builder
+# Using the official Rust image to compile the application.
+# Specific version pinning (1.83) ensures reproducible builds.
 FROM rust:1.83 as builder
 
+# Install system libraries required for compilation (Audio, UI, Wayland support)
 RUN apt-get update && apt-get install -y \
     libasound2-dev \
     libudev-dev \
@@ -16,17 +18,18 @@ RUN apt-get update && apt-get install -y \
 WORKDIR /usr/src/app
 COPY . .
 
-# On compile en mode release pour avoir les perfs maximales
+# Build the application in release mode for maximum performance optimizations
 RUN cargo build --release
 
-# Étape 2 : Image finale (Runtime)
-# On utilise une image minimale sécurisée (Google Distroless)
-# Cela rend ton image très légère (quelques Mo au lieu de 1Go+)
+# Stage 2: Runtime
+# Using Google Distroless image (Debian 12 based).
+# Distroless images contain only the application and its runtime dependencies.
+# They lack package managers, shells, and other standard programs, reducing the attack surface significantly.
 FROM gcr.io/distroless/cc-debian12
 
-# On copie uniquement l'exécutable compilé depuis l'étape 1
-# Remplace "Rust_visualizer" par le nom exact de ton binaire dans Cargo.toml si différent
+# Copy the compiled binary from the builder stage.
+# Ensure "Rust_visualizer" matches the [[bin]] name in Cargo.toml
 COPY --from=builder /usr/src/app/target/release/Rust_visualizer /app/rust-visualizer
 
-# Commande de lancement
+# Define the entrypoint for the container
 ENTRYPOINT ["/app/rust-visualizer"]

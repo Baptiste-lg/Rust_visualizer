@@ -1,6 +1,6 @@
 ﻿name: Rust Visualizer CI/CD
 
-# Trigger the workflow on push to main/master branches AND on semantic version tags (e.g., v5.0.0)
+# Trigger logic: Push to main/master or semantic tags
 on:
   push:
     branches: [ "main", "master" ]
@@ -11,15 +11,16 @@ on:
 env:
   CARGO_TERM_COLOR: always
 
-# Permissions needed to create releases and upload assets
+# Expanded permissions to allow Release creation and GitHub Pages deployment
 permissions:
   contents: write
   checks: write
   issues: write
+  pages: write      # Required for GitHub Pages
+  id-token: write   # Required for OIDC authentication with GitHub Pages
 
 jobs:
   # Job 1: Quality Assurance & Security
-  # Runs standard checks: formatting, linting, and security audit
   quality:
     name: Code Quality & Security
     runs-on: ubuntu-latest
@@ -27,10 +28,12 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Install Linux Audio Dependencies
+      # Installing system dependencies required for audio/graphics libraries
+      - name: Install Linux Audio & Graphics Dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y libasound2-dev libudev-dev pkg-config libx11-dev libxcursor-dev libxi-dev libxrandr-dev libwayland-dev libxkbcommon-dev
+
       - name: Cache Cargo registry & index
         uses: actions/cache@v3
         with:
@@ -45,7 +48,7 @@ jobs:
         with:
           components: rustfmt, clippy
 
-      # Check for vulnerabilities in dependencies (DevSecOps best practice)
+      # Security Audit: Scans Cargo.lock for vulnerabilities reported in the RustSec Advisory Database
       - name: Security Audit
         uses: actions-rs/audit-check@v1
         with:
@@ -58,8 +61,7 @@ jobs:
       - name: Run Clippy (Linter)
         run: cargo clippy -- -D warnings
 
-  # Job 2: Test Suite (Matrix Strategy)
-  # Runs tests on Linux, Windows, and macOS simultaneously
+  # Job 2: Test Suite
   test:
     name: Test on ${{ matrix.os }}
     needs: quality
@@ -72,23 +74,63 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      # Conditional dependency installation for Linux runners only
       - name: Install Linux Dependencies
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y libasound2-dev libudev-dev pkg-config libx11-dev libxcursor-dev libxi-dev libxrandr-dev libwayland-dev libxkbcommon-dev
+
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
-      # Intelligent caching for Rust based on the OS
+      # Implements intelligent caching specifically for Rust build artifacts
       - name: Rust Cache
         uses: swatinem/rust-cache@v2
 
       - name: Run Tests
         run: cargo test --verbose
 
-  # Job 3: Continuous Deployment (Release)
-  # Only runs if the trigger is a Tag (e.g., v5.0.0) and previous tests passed
+  # Job 3: Auto-Documentation (NEW)
+  # Generates Rust documentation and deploys to GitHub Pages
+  documentation:
+    name: Build & Deploy Docs
+    needs: quality
+    # Only deploy docs on pushes to main or tags, preventing broken docs from PRs
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/'))
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Linux Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libasound2-dev libudev-dev pkg-config libx11-dev libxcursor-dev libxi-dev libxrandr-dev libwayland-dev libxkbcommon-dev
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      # Generates HTML documentation from doc comments (///) in the code
+      # --no-deps ensures we only document our code, not all dependencies
+      - name: Generate Documentation
+        run: cargo doc --no-deps --release
+
+      # Sets up the GitHub Pages artifact specifically from the generated target/doc directory
+      - name: Upload Pages Artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: target/doc
+
+      # Deploys the artifact using GitHub's OIDC token
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
+
+  # Job 4: Continuous Deployment (Release)
   deploy:
     name: Deploy Release for ${{ matrix.os }}
     needs: test
@@ -114,18 +156,23 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
+      # Dependencies needed for compilation on Linux runners
+      - name: Install Linux Dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libasound2-dev libudev-dev pkg-config libx11-dev libxcursor-dev libxi-dev libxrandr-dev libwayland-dev libxkbcommon-dev
+
       - name: Build Release Binary
         run: cargo build --release --verbose
 
-      # Renaming binary to include OS name before uploading
-      # Using shell: bash to ensure compatibility across Windows/Linux/Mac runners
+      # Prepares the binary for upload by renaming it according to the OS convention
+      # 'shell: bash' unifies the command syntax across different OS runners
       - name: Prepare Artifact
         shell: bash
         run: |
           cp target/release/${{ matrix.artifact_name }} ${{ matrix.asset_name }}
 
-      # Creates the release on GitHub and uploads the binary assets
-      # Uses softprops/action-gh-release which is the standard for this
       - name: Create Release & Upload Asset
         uses: softprops/action-gh-release@v1
         with:

@@ -305,12 +305,13 @@ fn main_ui_layout(
                 selected_source.0 = AudioSource::Microphone;
             }
 
-            if ui.button("📂 Load File").clicked()
-                && let Some(path) = rfd::FileDialog::new()
+            if ui.button("📂 Load File").clicked() {
+                if let Some(path) = rfd::FileDialog::new()
                     .add_filter("audio", &["mp3", "wav"])
                     .pick_file()
-            {
-                selected_source.0 = AudioSource::File(path);
+                {
+                    selected_source.0 = AudioSource::File(path);
+                }
             }
 
             // Playback Controls (If file)
