@@ -6,17 +6,18 @@ struct IcoMaterial {
     color: vec4<f32>,            // Tint global
     resolution_mouse: vec4<f32>, // xy = physical resolution, zw = mouse
     time_params: vec4<f32>,      // x = time, y = speed, z = CAMERA ZOOM
+    audio_params: vec4<f32>,     // x = Bass, y = Mid, z = Treble, w = Flux
 };
 
 @group(2) @binding(0)
 var<uniform> material: IcoMaterial;
 
 const PI: f32 = 3.14159265359;
-const MAX_TRACE_DISTANCE: f32 = 20.0; // Augmenté pour supporter le dézoom
+const MAX_TRACE_DISTANCE: f32 = 40.0;
 const INTERSECTION_PRECISION: f32 = 0.001;
 const NUM_OF_TRACE_STEPS: i32 = 100;
 
-// --- 2. STRUCTURES DE DONNÉES ---
+// --- 2. DATA STRUCTURES ---
 
 struct IcoBasis {
     nc: vec3<f32>,
@@ -118,7 +119,7 @@ fn bToC(A: vec3<f32>, B: vec3<f32>, C: vec3<f32>, barycentric: vec3<f32>) -> vec
     return barycentric.x * A + barycentric.y * B + barycentric.z * C;
 }
 
-// --- 4. ICOSAHEDRON LOGIC ---
+// --- 4. ICOSAHEDRON GEOMETRY SETUP ---
 
 fn initIcosahedron() -> IcoBasis {
     let Type = 5.0;
@@ -186,6 +187,9 @@ fn pModIcosahedron(p: ptr<function, vec3<f32>>, subdivisions: i32, basis: IcoBas
 }
 
 fn pRoll(p: ptr<function, vec3<f32>>, t: f32, basis: IcoBasis) {
+    // Modify rotation speed slightly with music flux
+    let speed_mod = 1.0 + material.audio_params.w * 0.5;
+
     var yx = vec2<f32>((*p).y, (*p).x);
     yx = pR(yx, PI / 3.0);
     (*p).y = yx.x;
@@ -196,7 +200,7 @@ fn pRoll(p: ptr<function, vec3<f32>>, t: f32, basis: IcoBasis) {
     (*p).y = yz.x;
     (*p).z = yz.y;
 
-    let m = rotationMatrix(normalize(basis.icoF1a), t * ((PI * 2.0) / 3.0));
+    let m = rotationMatrix(normalize(basis.icoF1a), t * speed_mod * ((PI * 2.0) / 3.0));
     *p = m * (*p);
 }
 
@@ -212,7 +216,9 @@ fn fHolePart(p: vec3<f32>, a: vec3<f32>, b: vec3<f32>, c: vec3<f32>, d: vec3<f32
 fn fHole(p: vec3<f32>, a: vec3<f32>, b: vec3<f32>, c: vec3<f32>) -> f32 {
     let w = 1.0;
     let h = 1.0;
-    let round_r = 0.08;
+
+    // React to Mid frequencies: Change the hole roundness
+    let round_r = 0.08 + (material.audio_params.y * 0.05);
     let thick = 0.02;
 
     let AB = mix(a, b, 0.5);
@@ -239,10 +245,13 @@ fn holes(p: vec3<f32>, i: f32, basis: IcoBasis) -> f32 {
 }
 
 fn spikes(p: vec3<f32>, basis: IcoBasis) -> f32 {
+    // React to Treble: Increase spike length
+    let spike_boost = material.audio_params.z * 1.5;
+
     var d = 1000.0;
-    d = min(d, fConeDirected(p, 0.05, 1.3, basis.icoF1a));
-    d = min(d, fConeDirected(p, 0.05, 1.7, basis.icoA1));
-    d = min(d, fConeDirected(p, 0.05, 1.8, basis.icoB1));
+    d = min(d, fConeDirected(p, 0.05, 1.3 + spike_boost, basis.icoF1a));
+    d = min(d, fConeDirected(p, 0.05, 1.7 + spike_boost, basis.icoA1));
+    d = min(d, fConeDirected(p, 0.05, 1.8 + spike_boost, basis.icoB1));
     return d;
 }
 
@@ -250,11 +259,14 @@ fn shell(p: vec3<f32>, i: f32, basis: IcoBasis) -> f32 {
     let thick = 0.03;
     let round_r = 0.015;
 
-    var d = length(p) - 1.0;
+    // React to Bass: Pulse the main shell size
+    let pulse = material.audio_params.x * 0.2;
+
+    var d = length(p) - (1.0 + pulse);
     d = fOpUnionRound(d, spikes(p, basis), 0.12);
-    d = max(d, -(length(p) - (1.0 - thick)));
+    d = max(d, -(length(p) - ((1.0 + pulse) - thick)));
     var h = holes(p, i, basis);
-    h = max(h, (length(p) - 1.1));
+    h = max(h, (length(p) - 1.1 - pulse));
     d = fOpIntersectionRound(d, -h, round_r);
     return d;
 }
@@ -325,7 +337,11 @@ fn doLighting(col_in: vec3<f32>, pos: vec3<f32>, nor: vec3<f32>, refl: vec3<f32>
     lin += 1.20 * dif * vec3<f32>(0.95, 0.80, 0.60) * material.color.rgb;
     lin += 0.80 * amb * vec3<f32>(0.50, 0.70, 0.80) * occ;
     lin += 0.30 * bac * vec3<f32>(0.25, 0.25, 0.25) * occ;
-    lin += 0.20 * fre * vec3<f32>(1.00, 1.00, 1.00) * occ;
+
+    // React to Flux: Add extra brightness to the fresnel rim light
+    let flux_flash = material.audio_params.w * 0.5;
+    lin += (0.20 + flux_flash) * fre * vec3<f32>(1.00, 1.00, 1.00) * occ;
+
     col = col * lin;
 
     return col;
@@ -382,26 +398,17 @@ fn fragment(mesh: VertexOutput) -> @location(0) vec4<f32> {
     t_val = (t_val / 4.0) - floor(t_val / 4.0);
 
     let resolution = material.resolution_mouse.xy;
-    // CORRECTION : On ne divise plus par la resolution ici pour le mouse.
-    // On utilise directement le zoom envoyé par la caméra (paramètre Z)
     let camera_zoom_scale = material.time_params.z;
 
     if (resolution.x == 0.0) { return vec4<f32>(0.0); }
 
-    // CORRECTION CENTRAGE :
-    // mesh.position est en coordonnées pixel (0..Width, 0..Height).
-    // Pour centrer (0,0 au milieu), on fait (2*pos - res) / res.y
-    // Si la résolution passée en uniform (physique) correspond à mesh.position (physique),
-    // l'objet sera parfaitement au centre.
+    // Center coordinates: (0,0) is center of screen
     let p = (2.0 * mesh.position.xy - resolution.xy) / resolution.y;
     let p_corrected = vec2<f32>(p.x, -p.y);
 
     let orient = normalize(vec3<f32>(0.1, 1.0, 0.0));
 
-    // CORRECTION ZOOM :
-    // Bevy Camera Scale : 1.0 = normal, 2.0 = dézoomé (l'objet est plus petit)
-    // Raymarching : ro (origine rayon) doit être plus loin pour voir l'objet plus petit.
-    // 4.0 est la distance de base. On multiplie par le scale de la caméra.
+    // Distance of camera (ro). Scaled by camera zoom.
     var zoom = 4.0 * camera_zoom_scale;
 
     let ro = zoom * orient;
@@ -413,6 +420,7 @@ fn fragment(mesh: VertexOutput) -> @location(0) vec4<f32> {
     let res = calcIntersection(ro, rd, basis, t_val);
     var color = render_scene(res, ro, rd, basis, t_val);
 
+    // Gamma correction
     color = pow(color, vec3<f32>(1.0 / 2.2));
 
     return vec4<f32>(color, 1.0);
