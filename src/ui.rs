@@ -41,7 +41,6 @@ impl Plugin for UiPlugin {
                             .or_else(in_state(AppState::Visualization3D))
                             .or_else(in_state(AppState::VisualizationOrb))
                             .or_else(in_state(AppState::VisualizationDisc))
-                            // AJOUT : On active l'UI pour le mode Ico
                             .or_else(in_state(AppState::VisualizationIco)),
                     ),
             );
@@ -425,7 +424,7 @@ fn visualizer_ui_system(
             active_viz.0 = AppState::VisualizationDisc;
         }
         // AJOUT : Bouton pour sélectionner le visualiseur Ico
-        if ui.button("Ico Shader").clicked() {
+        if ui.button("Icosahedron").clicked() {
             next_app_state.set(AppState::VisualizationIco);
             active_viz.0 = AppState::VisualizationIco;
         }
