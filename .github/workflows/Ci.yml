@@ -1,65 +1,92 @@
-﻿name: Rust Visualizer CI
+﻿name: Rust Visualizer CI/CD
 
 on:
   push:
     branches: [ "main", "master" ]
   pull_request:
     branches: [ "main", "master" ]
+  workflow_dispatch:
 
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  # Job 1: Check code formatting
-  formatting:
-    name: Check Formatting
-    runs-on: self-hosted
+  # Job 1: Quality Assurance & Security (DevSecOps)
+  quality:
+    name: Code Quality & Security
+    runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+
+      - name: Cache Cargo registry & index
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Security Audit (DevSecOps)
+        uses: actions-rs/audit-check@v1
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Check Formatting
         run: cargo fmt -- --check
 
-  # Job 2: Run linter (Clippy)
-  linting:
-    name: Run Clippy
-    runs-on: self-hosted
-    needs: formatting
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
       - name: Run Clippy (Linting)
         run: cargo clippy -- -D warnings
 
-  # Job 3: Run unit and integration tests
-  testing:
-    name: Run Tests
-    runs-on: self-hosted
-    needs: linting
+  # Job 2: Testing & Coverage (Matrix Strategy)
+  test:
+    name: Test on ${{ matrix.os }}
+    needs: quality
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-      - name: Run tests
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust Cache
+        uses: swatinem/rust-cache@v2
+
+      - name: Run Tests
         run: cargo test --verbose
 
-  # Job 4: Build Release & Upload Artifact
+  # Job 3: Build & Release (CD)
   build:
     name: Build Release
-    runs-on: self-hosted
-    needs: testing
+    needs: test
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+    runs-on: windows-latest
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      # Verify the Rust toolchain version
-      - name: Ensure Rust toolchain
-        run: rustup show
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
 
       - name: Build Release
         run: cargo build --release --verbose
 
+      - name: Rename Artifact
+        run: |
+          mv target/release/Rust_visualizer.exe Rust_visualizer_${{ github.sha }}.exe
+        shell: bash
+
       - name: Upload Binary Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: rust-visualizer-windows
-          path: target/release/Rust_visualizer.exe
+          name: rust-visualizer-windows-release
+          path: Rust_visualizer_*.exe
+          retention-days: 5
